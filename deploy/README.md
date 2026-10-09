@@ -2,7 +2,7 @@
 
 Pile Docker auto-hébergée autour du serveur MCP de ce dépôt ([mcp-leclerc-drive](../README.md)), compilé depuis `src/` :
 
-- **Interface web** : vue du panier, onglet des articles en rupture, recherche de produits, alertes en un clic et page de gestion des alertes.
+- **Interface web** : panier modifiable (quantités, retrait), onglet des articles en rupture, recherche de produits avec ajout au panier, favoris (produits habituels et listes du compte), Nutri-Score, alertes en un clic et page de gestion des alertes.
 - **Notifications [ntfy](https://ntfy.sh)** sur le téléphone ou le bureau quand un produit surveillé redevient disponible. Aucune IA dans la boucle : aucun token consommé.
 - **Vérification périodique** à intervalle configurable, avec un délai aléatoire en plus.
 - **Serveur MCP** pour Claude Code / Claude Desktop, sur le même navigateur connecté, compilé depuis la source du dépôt.
@@ -18,7 +18,7 @@ Pile Docker auto-hébergée autour du serveur MCP de ce dépôt ([mcp-leclerc-dr
 ┌───────────────────────▼──────────┐      ┌────────────▼──────────────┐
 │ browser  (container leclerc-drive)│      │ web                        │
 │  Xvfb + Chrome (session Leclerc)  │◄─────┤  UI + API (mot de passe)   │
-│  bridge HTTP :8000 (lecture seule)│ jeton│  planificateur + ntfy      │
+│  bridge HTTP :8000                │ jeton│  planificateur + ntfy      │
 │  mcp-leclerc-drive (docker exec)  │      │  /data/alerts.json         │
 └───────────────┬──────────────────┘      └────────────┬──────────────┘
                 │      réseau « internal » (sans Internet, sans hôte)
@@ -27,7 +27,7 @@ Pile Docker auto-hébergée autour du serveur MCP de ce dépôt ([mcp-leclerc-dr
 ```
 
 - **browser** : Chrome tourne dans un écran virtuel, avec le profil persistant dans un volume. On s'y connecte une fois à Leclerc Drive via noVNC. Le site est protégé par DataDome, qui bloque les clients automatisés : toutes les requêtes passent donc par ce vrai navigateur.
-  - Le **bridge** n'expose que des lectures (panier, recherche, disponibilité, magasin). Il ne peut pas modifier le panier.
+  - Le **bridge** expose des lectures (panier, recherche, disponibilité, produits habituels, listes, magasin) et une seule écriture : la quantité d'une ligne du panier. Jamais de commande, de créneau ni de paiement. `CART_WRITE=false` le remet en lecture seule.
   - Il travaille dans **son propre onglet**, sans jamais toucher à votre onglet VNC ni à celui du MCP.
 - **web** : interface et API sans framework ni dépendance npm à l'exécution, dans une image distroless. Le planificateur interroge le bridge uniquement s'il y a des alertes actives.
 - **ntfy** (optionnel, profil `selfhosted-ntfy`) : votre propre serveur de notifications, avec authentification obligatoire.
@@ -162,9 +162,10 @@ docker compose ps        # les deux services doivent passer « healthy »
 
 | Onglet | Rôle |
 | --- | --- |
-| **Panier** | Contenu du panier, avec la disponibilité de chaque article. |
+| **Panier** | Contenu du panier, avec la disponibilité et le Nutri-Score de chaque article. Boutons **−** / **+** par ligne ; à 0, l'article est retiré. Les clics rapprochés sont regroupés en un seul envoi. |
 | **Ruptures** | Articles du panier en rupture, avec un bouton **M'alerter**. |
-| **Recherche** | Recherche dans le catalogue du magasin, avec **M'alerter** sur tout produit en rupture, même hors panier. |
+| **Recherche** | Recherche dans le catalogue du magasin : **Ajouter** au panier, ou **M'alerter** sur tout produit en rupture, même hors panier. |
+| **Favoris** | « Mes produits habituels » et chaque liste du compte (une liste nommée « Favoris » est ouverte par défaut), avec filtre, ajout au panier et alertes. |
 | **Alertes** | Alertes actives et notifiées : date de la dernière vérification, **Réarmer**, **Supprimer**, **Vérifier maintenant** (au plus une fois toutes les 2 minutes). |
 | **Réglages** | Magasin, fréquence, dernière erreur, test de notification. |
 
@@ -187,6 +188,7 @@ Toutes les variables sont documentées dans [`.env.example`](.env.example). Les 
 | `NTFY_URL` / `NTFY_TOPIC` / `NTFY_TOKEN` | `https://ntfy.sh` / — / — | Destination des notifications. |
 | `NTFY_PRIORITY` | `4` | Priorité des notifications de disponibilité (1 à 5). |
 | `NOTIFY_CART_OUT_OF_STOCK` | `false` | Notifier aussi les nouvelles ruptures dans le panier. |
+| `CART_WRITE` | `true` | Autoriser l'interface à modifier le panier. `false` : interface en lecture seule, refus aussi côté bridge. |
 | `PUBLIC_URL` | — | URL de l'interface, ajoutée comme lien aux notifications. |
 | `SESSION_TTL` | `7d` | Durée d'une session de l'interface. |
 | `WEB_PORT` / `VNC_PORT` | `8080` / `6080` | Ports publiés, sur 127.0.0.1 uniquement. |
@@ -237,7 +239,26 @@ Le conteneur navigateur garde le nom `leclerc-drive`, pour que le MCP s'y branch
 claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive
 ```
 
-Le MCP réutilise le Chrome connecté et le magasin détecté (outil `detect_store`), et `get_cart` signale les articles en rupture. Il peut, lui, **modifier le panier** (ajout, retrait, quantités). Le conteneur exécute la version de `src/` du dépôt : après une modification du MCP, `docker compose up -d --build browser`.
+Le MCP réutilise le Chrome connecté et le magasin détecté (outil `detect_store`). `get_cart` signale les articles en rupture, `get_usual_products`, `get_lists` et `get_list` donnent les produits habituels et les listes (dont une liste « Favoris »), et le Nutri-Score figure dans toutes les listes de produits. Il peut aussi **modifier le panier** (ajout, retrait, quantités), indépendamment de `CART_WRITE`, qui ne concerne que l'interface.
+
+Pour ne pas valider chaque lecture, autorisez les outils en lecture seule dans `~/.claude/settings.json` (les modifications du panier continueront de demander confirmation) :
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "mcp__leclerc-drive__get_cart",
+      "mcp__leclerc-drive__search_product",
+      "mcp__leclerc-drive__get_usual_products",
+      "mcp__leclerc-drive__get_lists",
+      "mcp__leclerc-drive__get_list",
+      "mcp__leclerc-drive__get_store",
+      "mcp__leclerc-drive__find_stores",
+      "mcp__leclerc-drive__detect_store"
+    ]
+  }
+}
+``` Le conteneur exécute la version de `src/` du dépôt : après une modification du MCP, `docker compose up -d --build browser`.
 
 ## CLI
 
@@ -256,7 +277,7 @@ scripts/ruptures.sh --json   # JSON, ex. : scripts/ruptures.sh --json | jq '.out
   - jeton CSRF sur toute requête qui modifie, et refus des requêtes cross-site ;
   - au-delà de 5 échecs de connexion en 15 min, nouvelles tentatives refusées jusqu'à la fin de la fenêtre ;
   - CSP stricte sans script ni style en ligne ; contenus du site insérés uniquement en texte.
-- **Bridge** : jeton partagé comparé en temps constant, taille des requêtes bornée, aucune route d'écriture sur le panier.
+- **Bridge** : jeton partagé comparé en temps constant, taille des requêtes bornée. Seule écriture : la quantité d'une ligne du panier (entier de 0 à 99), refusée par le bridge lui-même si `CART_WRITE=false`, même si le conteneur web était compromis. Aucune route de commande, de créneau ou de paiement.
 - **Chaîne d'approvisionnement** :
   - images de base épinglées par digest ;
   - serveur MCP compilé depuis la source du dépôt, dépendances verrouillées par le `package-lock.json` racine et installées avec `npm ci --ignore-scripts` ;

@@ -36,6 +36,9 @@ export interface LeclercConfig {
   maxRetries: number;
   /** Base backoff for retries, in ms (doubles each attempt). */
   backoffBaseMs: number;
+
+  /** Look up missing Nutri-Scores on Open Food Facts by barcode (sends the EAN to OFF). */
+  openFoodFacts: boolean;
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -68,6 +71,7 @@ export function loadConfig(): LeclercConfig {
     jitterMs: intEnv("LECLERC_JITTER_MS", 400),
     maxRetries: intEnv("LECLERC_MAX_RETRIES", 3),
     backoffBaseMs: intEnv("LECLERC_BACKOFF_BASE_MS", 1500),
+    openFoodFacts: boolEnv("LECLERC_OPENFOODFACTS", true),
   };
 }
 

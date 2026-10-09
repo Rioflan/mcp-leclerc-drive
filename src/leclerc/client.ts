@@ -16,7 +16,7 @@
 import { ChromeSession, PageResponse } from "../browser.js";
 import { LeclercConfig, storePath } from "../config.js";
 import { StoreState } from "../store.js";
-import { Cart, CartItem, Product, ShoppingList } from "../types.js";
+import { Cart, CartItem, Product, ProductDetails, ShoppingList } from "../types.js";
 import { delay, Throttler } from "./throttle.js";
 
 /** HTTP statuses that indicate a DataDome challenge / rate-limit worth retrying. */
@@ -71,6 +71,10 @@ export interface RawProduct {
   /** Present on sticker entries (objStickers.lstProduitsStickers), not products. */
   sTypeSticker?: string;
   objSticker?: { sTexteAlternatif?: string };
+  /** Product page only. */
+  sCodeEAN?: string;
+  sLibelleMarque?: string;
+  sOrigine?: string;
 }
 
 /** Query token that returns no search results, so a fetched page carries only cart data. */
@@ -188,6 +192,17 @@ export class LeclercClient {
   /** The account's shopping lists ("Mes listes"), e.g. a "Favoris" list. */
   async getLists(): Promise<ShoppingList[]> {
     return parseLists(await this.storePage("mes-listes.aspx"));
+  }
+
+  /**
+   * Product page (`fiche-produits-{id}-x.aspx`, the slug is cosmetic): barcode,
+   * brand, origin, and a Nutri-Score sticker that listing pages sometimes omit
+   * (capture doc §6). One request per product: call it on demand, never in bulk.
+   */
+  async getProductDetails(productId: string): Promise<ProductDetails> {
+    if (!/^\d{1,12}$/.test(productId)) throw new Error(`Identifiant produit invalide : ${productId}`);
+    const html = await this.storePage(`fiche-produits-${productId}-x.aspx`);
+    return parseProductPage(html, productId);
   }
 
   /** Products of one shopping list. */
@@ -392,6 +407,25 @@ export function extractWidgetOptions(html: string, suffix: string): string | nul
   return null;
 }
 
+/** Main product of a product page: widget `..._pnlFicheProduit` (capture doc §6). */
+export function parseProductPage(html: string, productId: string): ProductDetails {
+  const scope = extractWidgetOptions(html, "_pnlFicheProduit") ?? "";
+  const records = scanProductRecords(scope).filter((r) => String(r.iIdProduit) === productId);
+  // Two records describe the product: the `objElement` (sType "Produit": stock,
+  // price) and a descriptive one (EAN, brand, origin, but no stock).
+  const element = records.find((r) => r.sType === "Produit" && r.sLibelleLigne1);
+  if (!element) throw new Error(`Produit ${productId} introuvable dans ce magasin.`);
+  const product = mapProduct(element, extractNutriScores(scanProductRecords(html)));
+  const info = records.find((r) => typeof r.sCodeEAN === "string");
+  const ean = info?.sCodeEAN && /^\d{8,14}$/.test(info.sCodeEAN) ? info.sCodeEAN : undefined;
+  return {
+    product,
+    ean,
+    brand: info?.sLibelleMarque ? decodeEntities(info.sLibelleMarque) : undefined,
+    origin: info?.sOrigine ? decodeEntities(info.sOrigine) : undefined,
+  };
+}
+
 /**
  * Lists from the "Mes listes" page: each one is a link
  * `<a id="..._hlDetailsListe" href=".../detail-liste-{id}.aspx">{name}</a>`
@@ -439,6 +473,7 @@ export function mapProduct(rp: RawProduct, nutriScores?: Map<string, string>): P
     price,
     pricePerUnit: rp.sPrixParUniteDeMesure || undefined,
     nutriScore: nutriScores?.get(String(rp.iIdProduit)),
+    nutriScoreSource: nutriScores?.has(String(rp.iIdProduit)) ? "leclerc" : undefined,
     available: (num(rp.iQteDisponible) ?? 0) > 0,
     imageUrl: rp.sUrlVignetteProduit || undefined,
   };

@@ -21,6 +21,7 @@ import { ChromeSession } from "./browser.js";
 import { loadConfig } from "./config.js";
 import { LeclercClient } from "./leclerc/client.js";
 import { FoundStore, StoreLocator } from "./leclerc/locator.js";
+import { NutriCache, resolveNutriScore } from "./nutrition.js";
 import { parseStoreUrl, StoreState, validateStore } from "./store.js";
 import { Cart, Product } from "./types.js";
 
@@ -40,6 +41,20 @@ const browser = new ChromeSession({
 const store = new StoreState(config);
 const client = new LeclercClient(config, browser, store);
 const locator = new StoreLocator(config, browser);
+const nutri = new NutriCache();
+const userAgent = `mcp-leclerc-drive/${pkg.version} (+https://github.com/skunkobi/mcp-leclerc-drive)`;
+
+/** Fill missing Nutri-Scores from the cache (written by get_product and the deploy bridge). */
+function withCachedNutri(products: Product[]): Product[] {
+  nutri.reload();
+  return products.map((p) => nutri.apply(p));
+}
+function cartWithCachedNutri(cart: Cart): Cart {
+  nutri.reload();
+  return { ...cart, items: cart.items.map((it) => ({ ...it, product: nutri.apply(it.product) })) };
+}
+const nutriLabel = (p: Product) =>
+  p.nutriScore ? `Nutri-Score ${p.nutriScore}${p.nutriScoreSource === "openfoodfacts" ? " (Open Food Facts)" : ""}` : null;
 
 // Cache of the last find_stores results, so set_store can resolve the host
 // (and noPR) from just a store id the user picked.
@@ -56,7 +71,7 @@ function formatProduct(p: Product): string {
     p.brand ? `(${p.brand})` : null,
     `— ${p.price.toFixed(2)} €`,
     p.pricePerUnit ? `[${p.pricePerUnit}]` : null,
-    p.nutriScore ? `Nutri-Score ${p.nutriScore}` : null,
+    nutriLabel(p),
     p.available ? null : "⚠️ indisponible",
     `id=${p.id}`,
   ].filter(Boolean);
@@ -68,7 +83,7 @@ function formatCart(cart: Cart): string {
   const lines = cart.items.map(
     (it) =>
       `• ${it.quantity}× ${it.product.label} — ${it.lineTotal.toFixed(2)} € ` +
-      `${it.product.nutriScore ? `Nutri-Score ${it.product.nutriScore} ` : ""}` +
+      `${it.product.nutriScore ? `${nutriLabel(it.product)} ` : ""}` +
       `${it.product.available ? "" : "⚠️ indisponible "}(id=${it.product.id})`,
   );
   const unavailable = cart.items.filter((it) => !it.product.available).length;
@@ -97,7 +112,7 @@ server.tool(
   { query: z.string().describe("Termes de recherche, ex. 'lait demi-écrémé bio'") },
   async ({ query }) => {
     try {
-      const products = await client.searchProducts(query);
+      const products = withCachedNutri(await client.searchProducts(query));
       if (products.length === 0) return asText(`Aucun produit trouvé pour « ${query} ».`);
       return asText(products.map(formatProduct).join("\n"));
     } catch (err) {
@@ -116,7 +131,7 @@ server.tool(
   async ({ product_id, quantity }) => {
     try {
       const cart = await client.addToCart(product_id, quantity);
-      return asText(`Ajouté.\n\n${formatCart(cart)}`);
+      return asText(`Ajouté.\n\n${formatCart(cartWithCachedNutri(cart))}`);
     } catch (err) {
       return asError(err);
     }
@@ -130,7 +145,7 @@ server.tool(
   async ({ product_id }) => {
     try {
       const cart = await client.removeFromCart(product_id);
-      return asText(`Retiré.\n\n${formatCart(cart)}`);
+      return asText(`Retiré.\n\n${formatCart(cartWithCachedNutri(cart))}`);
     } catch (err) {
       return asError(err);
     }
@@ -147,7 +162,7 @@ server.tool(
   async ({ product_id, quantity }) => {
     try {
       const cart = await client.updateQuantity(product_id, quantity);
-      return asText(`Quantité mise à jour.\n\n${formatCart(cart)}`);
+      return asText(`Quantité mise à jour.\n\n${formatCart(cartWithCachedNutri(cart))}`);
     } catch (err) {
       return asError(err);
     }
@@ -160,7 +175,7 @@ server.tool(
   {},
   async () => {
     try {
-      const cart = await client.getCart();
+      const cart = cartWithCachedNutri(await client.getCart());
       return asText(formatCart(cart));
     } catch (err) {
       return asError(err);
@@ -175,7 +190,7 @@ server.tool(
   {},
   async () => {
     try {
-      const products = await client.getUsualProducts();
+      const products = withCachedNutri(await client.getUsualProducts());
       if (products.length === 0) {
         return asText(
           "Aucun produit habituel : le compte doit être connecté dans Chrome et avoir déjà commandé en drive.",
@@ -215,9 +230,59 @@ server.tool(
   { list_id: z.string().regex(/^\d{1,12}$/).describe("Identifiant de la liste (champ list_id de get_lists)") },
   async ({ list_id }) => {
     try {
-      const products = await client.getList(list_id);
+      const products = withCachedNutri(await client.getList(list_id));
       if (products.length === 0) return asText("Liste vide.");
       return asText(`${products.length} produit(s) :\n${products.map(formatProduct).join("\n")}`);
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.tool(
+  "get_product",
+  "Fiche d'un produit : code-barres (EAN), marque, origine, disponibilité, Nutri-Score " +
+    "(page Leclerc, sinon Open Food Facts) et valeurs nutritionnelles Open Food Facts. " +
+    "Une requête au site par appel : à utiliser pour quelques produits, pas en masse.",
+  { product_id: z.string().regex(/^\d{1,12}$/).describe("Identifiant produit (champ id)") },
+  async ({ product_id }) => {
+    try {
+      const { details, entry, off } = await resolveNutriScore(
+        (id) => client.getProductDetails(id),
+        nutri,
+        product_id,
+        { openFoodFacts: config.openFoodFacts, userAgent, alwaysOpenFoodFacts: true },
+      );
+      const p = details.product;
+      const lines = [
+        formatProduct(nutri.apply(p)),
+        details.brand ? `Marque : ${details.brand}` : null,
+        details.origin ? `Origine : ${details.origin}` : null,
+        details.ean ? `EAN : ${details.ean}` : "EAN : non communiqué par Leclerc",
+        entry.grade
+          ? null
+          : "Nutri-Score : aucun (produit frais ou non concerné, ou inconnu d'Open Food Facts)",
+      ];
+      if (off) {
+        const n = off.nutriments;
+        const facts = [
+          n.energyKcal !== undefined ? `${n.energyKcal} kcal` : null,
+          n.fat !== undefined ? `matières grasses ${n.fat} g` : null,
+          n.saturatedFat !== undefined ? `dont saturées ${n.saturatedFat} g` : null,
+          n.sugars !== undefined ? `sucres ${n.sugars} g` : null,
+          n.salt !== undefined ? `sel ${n.salt} g` : null,
+          n.proteins !== undefined ? `protéines ${n.proteins} g` : null,
+          n.fiber !== undefined ? `fibres ${n.fiber} g` : null,
+        ].filter(Boolean);
+        lines.push(
+          `Open Food Facts : ${off.name ?? "?"}${off.nutriScore ? `, Nutri-Score ${off.nutriScore}` : ""}` +
+            `${off.novaGroup ? `, NOVA ${off.novaGroup}` : ""} — ${off.url}`,
+        );
+        if (facts.length) lines.push(`Pour 100 g : ${facts.join(", ")}`);
+      } else if (details.ean && config.openFoodFacts) {
+        lines.push("Open Food Facts : produit inconnu.");
+      }
+      return asText(lines.filter(Boolean).join("\n"));
     } catch (err) {
       return asError(err);
     }

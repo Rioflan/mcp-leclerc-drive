@@ -24,11 +24,13 @@ E.Leclerc Drive has no public API. Today the only way to automate it is browser 
 | `get_usual_products()` | The account's usual products ("Mes produits habituels") with price, Nutri-Score, availability and `id`. |
 | `get_lists()` | The account's shopping lists ("Mes listes", e.g. a "Favoris" list) with their `list_id`. |
 | `get_list(list_id)` | Products of one shopping list. |
+| `get_product(product_id)` | Product page: barcode (EAN), brand, origin, availability, Nutri-Score (Leclerc page, else [Open Food Facts](https://world.openfoodfacts.org)) and OFF nutrition facts. One site request per call. |
 
 ## Status
 
 - [x] Reverse-engineer Leclerc Drive endpoints (search / cart / store locator — see [`docs/api-capture.md`](docs/api-capture.md))
 - [x] Usual products, shopping lists and Nutri-Score (`get_usual_products`, `get_lists`, `get_list`)
+- [x] Missing Nutri-Scores completed from the product page or Open Food Facts by barcode (`get_product`, shared cache; disable OFF with `LECLERC_OPENFOODFACTS=false`)
 - [x] All 8 original tools validated end-to-end against the live store
 - [x] Runtime store selection with persistence (`find_stores` / `set_store`)
 - [x] **v0.3: DataDome-proof via real-Chrome CDP driving** (beats active bot-challenge that killed cookie-replay) ✅

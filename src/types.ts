@@ -19,6 +19,8 @@ export interface Product {
   pricePerUnit?: string;
   /** Nutri-Score letter A–E, when available. */
   nutriScore?: string;
+  /** Where nutriScore comes from: the Leclerc page, or Open Food Facts by barcode. */
+  nutriScoreSource?: "leclerc" | "openfoodfacts";
   /** Whether the item is currently orderable in the selected store. */
   available: boolean;
   /** Thumbnail image URL, when available. */
@@ -47,4 +49,12 @@ export interface ShoppingList {
   name: string;
   /** Number of products shown on the "Mes listes" page, when present. */
   productCount?: number;
+}
+
+export interface ProductDetails {
+  product: Product;
+  /** Barcode (EAN-13 / EAN-8) from the product page, when present. */
+  ean?: string;
+  brand?: string;
+  origin?: string;
 }

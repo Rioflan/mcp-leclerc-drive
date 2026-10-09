@@ -186,6 +186,22 @@ the usual `objElement` records (§1) and the cart embedded as on every page (§3
   `GET .../detail-liste-{id}.aspx`, widget `..._pnlElementProduitDetailListe`.
   Product records carry `fAppartientAUneListe`.
 
+## 6. Product page — `GET .../fiche-produits-{id}-{slug}.aspx` (validated 2026-10-10)
+
+The slug is cosmetic (`fiche-produits-6075-x.aspx` works). The product sits in
+the widget `initOptions('..._pnlFicheProduit', {...})` as two records with the same
+`iIdProduit`: the usual `objElement` (`sType: "Produit"`, stock, price) and a
+descriptive one with **`sCodeEAN`** (barcode), `sLibelleMarque`, `sOrigine`.
+`lstValeursNutritionnelles` is empty on every product checked.
+
+The page's sticker list includes the product's **Nutri-Score even when listing
+pages omit it** (e.g. quinoa 6075: none on the cart page, A on its page). For
+the rest, the EAN can be looked up on Open Food Facts
+(`world.openfoodfacts.org/api/v2/product/{ean}.json?fields=nutriscore_grade,...`,
+descriptive User-Agent required). On a real cart, 13 products without a score
+gave 7 from the product page, 3 from OFF, and 3 with none (fresh produce, eggs,
+coffee: not covered by Nutri-Score, or "unknown" on OFF).
+
 ## Open items / to refine
 
 - Confirm `objContexteProvenanceArticle` can be fully omitted on **add** (only

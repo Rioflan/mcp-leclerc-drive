@@ -2,7 +2,7 @@
 
 > The first open-source **MCP server for E.Leclerc Drive** — let Claude search products, manage a cart, and prepare grocery orders natively, instead of clicking through the website.
 
-> 🟢 **v0.3 — working & DataDome-proof.** All eight tools are validated end-to-end against the live site. Requests run inside a **real Chrome driven over CDP**, so they pass DataDome's bot protection (which blocks headless clients and cookie-replay). You log into Leclerc Drive once in the window that opens; the session persists. See [`docs/api-capture.md`](docs/api-capture.md) for the reverse-engineered API.
+> 🟢 **v0.3 — working & DataDome-proof.** All tools are validated end-to-end against the live site. Requests run inside a **real Chrome driven over CDP**, so they pass DataDome's bot protection (which blocks headless clients and cookie-replay). You log into Leclerc Drive once in the window that opens; the session persists. See [`docs/api-capture.md`](docs/api-capture.md) for the reverse-engineered API.
 
 ## Why
 
@@ -13,13 +13,14 @@ E.Leclerc Drive has no public API. Today the only way to automate it is browser 
 | Tool | Description |
 | --- | --- |
 | `find_stores(query)` | Find drives near a postal code or city → name, id, service type, distance, host. |
-| `set_store(store_id)` | Select & remember the active store (resolves the right host automatically). |
+| `set_store(store_id, host?, no_pr?)` | Select & remember the active store (resolves the right host automatically; `host` + `no_pr` for a store not found via `find_stores`, e.g. a piéton relay). |
+| `detect_store()` | Detect the store from the Leclerc Drive tab open in the server's Chrome (where you are logged in) and select it. |
 | `get_store()` | Show the currently selected store. |
 | `search_product(query)` | Search the catalogue → products with price, price/kg, Nutri-Score, availability, and an `id`. |
 | `add_to_cart(product_id, quantity?)` | Add a product to the cart. |
 | `remove_from_cart(product_id)` | Remove a line from the cart. |
 | `update_quantity(product_id, quantity)` | Set a line's quantity (0 removes it). |
-| `get_cart()` | Read the full cart with total. |
+| `get_cart()` | Read the full cart with total, flagging out-of-stock items. |
 
 ## Status
 
@@ -142,7 +143,7 @@ npm run inspect    # run under the MCP Inspector
 
 ```
 src/
-  index.ts          # MCP server: registers the 8 tools over stdio
+  index.ts          # MCP server: registers the MCP tools over stdio
   config.ts         # env-based config (store, host, Chrome/CDP, throttle)
   types.ts          # Product / CartItem / Cart
   store.ts          # active store selection + persistence (~/.mcp-leclerc-drive)

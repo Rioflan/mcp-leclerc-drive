@@ -21,7 +21,7 @@ import { ChromeSession } from "./browser.js";
 import { loadConfig } from "./config.js";
 import { LeclercClient } from "./leclerc/client.js";
 import { FoundStore, StoreLocator } from "./leclerc/locator.js";
-import { StoreState } from "./store.js";
+import { parseStoreUrl, StoreState, validateStore } from "./store.js";
 import { Cart, Product } from "./types.js";
 
 // Single source of truth for the version: read it from package.json (one dir up
@@ -203,8 +203,15 @@ server.tool(
       .string()
       .optional()
       .describe("Host backend (optionnel) si le magasin n'a pas été trouvé via find_stores"),
+    no_pr: z
+      .string()
+      .optional()
+      .describe(
+        "Point de retrait (optionnel, avec host) : 2e numéro de l'URL magasin-<id>-<noPR>, " +
+          "différent de l'id pour les points de retrait piéton",
+      ),
   },
-  async ({ store_id, host }) => {
+  async ({ store_id, host, no_pr }) => {
     try {
       const found = lastFound.get(store_id);
       if (!found && !host) {
@@ -217,11 +224,45 @@ server.tool(
       }
       const selection = found
         ? { storeId: found.storeId, noPR: found.noPR, host: found.host, name: found.name }
-        : { storeId: store_id, noPR: store_id, host: host as string };
+        : { storeId: store_id, noPR: no_pr ?? store_id, host: host as string };
+      // Saisie manuelle uniquement : les résultats de find_stores viennent de l'API Leclerc.
+      const invalid = found ? null : validateStore(selection.storeId, selection.noPR, selection.host);
+      if (invalid) return asError(new Error(invalid));
       store.set(selection);
       return asText(
         `Magasin actif : ${selection.name ?? selection.storeId} ` +
           `(id=${selection.storeId} @ ${selection.host}). Mémorisé.`,
+      );
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.tool(
+  "detect_store",
+  "Détecte le magasin depuis l'onglet Leclerc Drive ouvert dans le Chrome du serveur " +
+    "(celui où l'utilisateur est connecté) et le sélectionne. Gère les points de retrait.",
+  {},
+  async () => {
+    try {
+      const urls = await browser.pageUrls();
+      // Priorité aux URL avec le nom du magasin (onglet de l'utilisateur) plutôt
+      // qu'aux pages techniques ouvertes par le serveur, qui n'en ont pas.
+      const found = urls.map(parseStoreUrl).filter((s) => s !== null);
+      const detected = found.find((s) => s.name) ?? found[0];
+      if (!detected) {
+        return asError(
+          new Error(
+            "Aucun onglet ouvert sur une page magasin Leclerc Drive. Ouvre ton drive dans la " +
+              "fenêtre Chrome du serveur (URL contenant /magasin-…), puis réessaie.",
+          ),
+        );
+      }
+      store.set(detected);
+      return asText(
+        `Magasin actif : ${detected.name ?? detected.storeId} ` +
+          `(id=${detected.storeId}, retrait=${detected.noPR} @ ${detected.host}). Mémorisé.`,
       );
     } catch (err) {
       return asError(err);

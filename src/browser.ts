@@ -231,6 +231,15 @@ export class ChromeSession {
     };
   }
 
+  /**
+   * URLs of the pages open in the debug Chrome (e.g. the tab the user logged
+   * into). Empty when Chrome is not running; never launches it.
+   */
+  async pageUrls(): Promise<string[]> {
+    const targets: Any[] = (await tryJson(`http://127.0.0.1:${this.opts.port}/json/list`)) || [];
+    return targets.filter((t) => t.type === "page" && typeof t.url === "string").map((t) => t.url);
+  }
+
   async close(): Promise<void> {
     try {
       this.ws?.close();

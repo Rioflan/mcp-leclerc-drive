@@ -167,6 +167,18 @@ Log into Leclerc Drive once via noVNC (http://127.0.0.1:6080/vnc.html, password:
 `docker exec leclerc-drive cat /data/.vnc/password.txt`), open your drive, then
 ask Claude to run `detect_store`.
 
+**Remote server** (LAN/VPN): the MCP server speaks stdio, so tunnel it over SSH —
+no extra port to open. Restrict a dedicated key to the MCP command in the
+server's `authorized_keys`
+(`command="docker exec -i leclerc-drive mcp-leclerc-drive",no-port-forwarding,no-pty …`),
+then on the client:
+
+```bash
+claude mcp add leclerc-drive -- ssh -i ~/.ssh/leclerc_mcp -o BatchMode=yes -T user@server
+```
+
+Step-by-step guide: [deploy/README.md](deploy/README.md#mcp-sur-une-machine-distante-lan-vpn).
+
 Full documentation (in French): [deploy/README.md](deploy/README.md).
 
 ## Development

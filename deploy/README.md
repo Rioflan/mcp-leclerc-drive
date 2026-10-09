@@ -55,6 +55,67 @@ claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive
 
 Ce mode reprend le même durcissement : noVNC uniquement sur `127.0.0.1`, port CDP non publié, conteneur non-root en lecture seule. Le bridge HTTP n'est pas démarré. Il utilise le même projet et le même volume que la stack complète : pour y passer plus tard sans se reconnecter, `docker compose -f compose.mcp.yaml down`, puis suivre l'installation ci-dessous.
 
+## MCP sur une machine distante (LAN, VPN)
+
+Le serveur MCP parle en stdio. Pour l'utiliser depuis le Claude d'une autre
+machine, il suffit de faire passer ce flux par **SSH** : pas de port
+supplémentaire à ouvrir, et c'est SSH qui gère l'authentification et le
+chiffrement. Sur le serveur, la stack (complète ou `compose.mcp.yaml`) tourne
+normalement.
+
+**1. Sur le client, une clé dédiée sans phrase de passe** (Claude lance la commande sans terminal, il ne peut donc rien saisir) :
+
+```bash
+ssh-keygen -t ed25519 -N "" -f ~/.ssh/leclerc_mcp -C leclerc-mcp
+```
+
+**2. Sur le serveur, restreindre cette clé à la seule commande MCP**, dans le `~/.ssh/authorized_keys` d'un utilisateur qui peut lancer `docker` :
+
+```
+command="docker exec -i leclerc-drive mcp-leclerc-drive",no-port-forwarding,no-X11-forwarding,no-agent-forwarding,no-pty ssh-ed25519 AAAA… leclerc-mcp
+```
+
+Avec `command=`, la clé ne peut rien faire d'autre que lancer le MCP, même si
+elle fuit : pas de shell, pas de tunnel, pas d'autre commande. C'est
+important, car appartenir au groupe `docker` équivaut à être root sur le serveur.
+
+**3. Sur le client, déclarer le serveur dans Claude :**
+
+```bash
+claude mcp add leclerc-drive -- ssh -i ~/.ssh/leclerc_mcp -o BatchMode=yes -T utilisateur@serveur
+```
+
+ou, dans la configuration de Claude Desktop :
+
+```json
+{
+  "mcpServers": {
+    "leclerc-drive": {
+      "command": "ssh",
+      "args": ["-i", "/home/vous/.ssh/leclerc_mcp", "-o", "BatchMode=yes", "-T", "utilisateur@serveur"]
+    }
+  }
+}
+```
+
+(Chemin absolu : la configuration JSON ne passe pas par un shell, `~` n'y est pas développé.)
+
+Avant la première utilisation, connectez-vous une fois à la main pour accepter
+l'empreinte du serveur (`ssh -i ~/.ssh/leclerc_mcp utilisateur@serveur`, qui
+lance le MCP : quittez avec Ctrl+C). Sinon, `BatchMode` refusera l'hôte
+inconnu.
+
+**4. Se connecter à Leclerc Drive** sur le Chrome du serveur, depuis le client, avec un tunnel vers noVNC (une autre clé, ou votre clé habituelle, car celle du MCP n'autorise pas les tunnels) :
+
+```bash
+ssh -L 6080:127.0.0.1:6080 utilisateur@serveur
+# puis http://127.0.0.1:6080/vnc.html sur le client
+```
+
+noVNC et le port CDP de Chrome restent ainsi sur `127.0.0.1` côté serveur :
+rien n'est exposé sur le réseau. Le MCP **peut modifier le panier** : ne donnez
+la clé qu'aux machines de confiance.
+
 ## Installation (stack complète)
 
 ```bash
@@ -170,7 +231,7 @@ L'interface et noVNC n'écoutent que sur `127.0.0.1`. Pour y accéder depuis une
 
 ## Serveur MCP (Claude Code)
 
-Le conteneur navigateur garde le nom `leclerc-drive`, pour que le MCP s'y branche directement, que ce soit avec la stack complète ou en [mode MCP seul](#serveur-mcp-seul-sans-interface-ni-alertes) :
+Le conteneur navigateur garde le nom `leclerc-drive`, pour que le MCP s'y branche directement, que ce soit avec la stack complète ou en [mode MCP seul](#serveur-mcp-seul-sans-interface-ni-alertes). Pour un Claude installé sur une autre machine, voir [MCP sur une machine distante](#mcp-sur-une-machine-distante-lan-vpn). En local :
 
 ```bash
 claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive

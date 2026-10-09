@@ -37,6 +37,12 @@ export interface ChromeOptions {
   port: number;
   /** Headless is detectable by DataDome — default false (a window opens). */
   headless: boolean;
+  /**
+   * Work in a tab of its own, opened on connect and closed by close(), instead
+   * of the first open tab. Lets several clients (or a user watching the window)
+   * share one Chrome without navigating each other's tab.
+   */
+  dedicatedTab?: boolean;
 }
 
 const DEFAULT_CHROME: Record<string, string> = {
@@ -66,6 +72,7 @@ export class ChromeSession {
   private eventWaiters: Array<{ method: string; res: () => void }> = [];
   private currentUrl = "";
   private launching?: Promise<void>;
+  private targetId?: string;
 
   constructor(private readonly opts: ChromeOptions) {}
 
@@ -112,9 +119,17 @@ export class ChromeSession {
       }
     }
 
-    let targets: Any[] = (await tryJson(`${base}/json/list`)) || [];
-    let page = targets.find((t) => t.type === "page");
-    if (!page) page = await tryJson(`${base}/json/new`, "PUT");
+    let page: Any;
+    if (this.opts.dedicatedTab) {
+      // Tab left over from a lost connection: close it before opening a new one.
+      if (this.targetId) await tryJson(`${base}/json/close/${this.targetId}`);
+      page = await tryJson(`${base}/json/new?about:blank`, "PUT");
+      this.targetId = page?.id;
+    } else {
+      const targets: Any[] = (await tryJson(`${base}/json/list`)) || [];
+      page = targets.find((t) => t.type === "page");
+      if (!page) page = await tryJson(`${base}/json/new`, "PUT");
+    }
     if (!page?.webSocketDebuggerUrl) {
       throw new Error("Impossible d'ouvrir un onglet CDP dans Chrome.");
     }
@@ -139,6 +154,12 @@ export class ChromeSession {
           return true;
         });
       }
+    };
+    ws.onclose = () => {
+      // Unblock in-flight calls; the next fetch() reconnects (ensureLaunched).
+      for (const res of this.pending.values()) res({ error: { message: "connexion CDP fermée" } });
+      this.pending.clear();
+      this.currentUrl = "";
     };
     this.ws = ws;
     await this.cdp("Page.enable");
@@ -245,6 +266,10 @@ export class ChromeSession {
       this.ws?.close();
     } catch {
       /* ignore */
+    }
+    if (this.opts.dedicatedTab && this.targetId) {
+      await tryJson(`http://127.0.0.1:${this.opts.port}/json/close/${this.targetId}`);
+      this.targetId = undefined;
     }
   }
 }

@@ -20,12 +20,16 @@ E.Leclerc Drive has no public API. Today the only way to automate it is browser 
 | `add_to_cart(product_id, quantity?)` | Add a product to the cart. |
 | `remove_from_cart(product_id)` | Remove a line from the cart. |
 | `update_quantity(product_id, quantity)` | Set a line's quantity (0 removes it). |
-| `get_cart()` | Read the full cart with total, flagging out-of-stock items. |
+| `get_cart()` | Read the full cart with total, Nutri-Score, flagging out-of-stock items. |
+| `get_usual_products()` | The account's usual products ("Mes produits habituels") with price, Nutri-Score, availability and `id`. |
+| `get_lists()` | The account's shopping lists ("Mes listes", e.g. a "Favoris" list) with their `list_id`. |
+| `get_list(list_id)` | Products of one shopping list. |
 
 ## Status
 
 - [x] Reverse-engineer Leclerc Drive endpoints (search / cart / store locator — see [`docs/api-capture.md`](docs/api-capture.md))
-- [x] All 8 tools validated end-to-end against the live store
+- [x] Usual products, shopping lists and Nutri-Score (`get_usual_products`, `get_lists`, `get_list`)
+- [x] All 8 original tools validated end-to-end against the live store
 - [x] Runtime store selection with persistence (`find_stores` / `set_store`)
 - [x] **v0.3: DataDome-proof via real-Chrome CDP driving** (beats active bot-challenge that killed cookie-replay) ✅
 - [x] Published to npm + MCP registry
@@ -143,9 +147,10 @@ the MCP server built from this repository's `src/`:
 
 - **browser**: Chrome in a virtual display (log in once via noVNC on
   `127.0.0.1:6080`), the MCP server (`docker exec -i leclerc-drive mcp-leclerc-drive`)
-  and an internal, read-only HTTP bridge.
-- **web**: a password-protected UI on `127.0.0.1:8080` — cart, out-of-stock tab,
-  product search, one-click restock alerts — and a scheduler that sends
+  and an internal HTTP bridge (reads, plus cart quantities unless `CART_WRITE=false`).
+- **web**: a password-protected UI on `127.0.0.1:8080` — cart with quantity
+  editing, out-of-stock tab, product search with add-to-cart, favourites (usual
+  products and lists), Nutri-Score badges, one-click restock alerts — and a scheduler that sends
   [ntfy](https://ntfy.sh) notifications when a watched product is back in stock
   (configurable interval + random jitter, no LLM involved).
 - Optional self-hosted ntfy server.

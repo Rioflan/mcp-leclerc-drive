@@ -70,6 +70,19 @@ incl. DataDome, replayed).
 - Product images also load from
   `fd9-photos.leclercdrive.fr/image.ashx?id={photoId}&use=l&cat=p` and
   Nutri-Score from `...&use=nsc` (note: photo id ≠ `iIdProduit`).
+- **Nutri-Score** (validated 2026-10-09) is not a product field: every store page
+  (search, cart, usual products, lists) carries sticker entries in
+  `"objStickers":{"lstProduitsStickers":[...]}`, one per product and sticker type:
+
+  ```json
+  {"iIdProduit": 171757, "sTypeSticker": "NUTRISCORE",
+   "objSticker": {"sTypeSticker": "NUTRISCORE", "sTexteAlternatif": "Nutri Score B",
+                  "sUrlCheminFinal": "image.ashx?id=2389083&use=nsc&..."}}
+  ```
+
+  The letter is read from `sTexteAlternatif`. **G** means the brand does not
+  publish it and is treated as unknown. Products with no NUTRISCORE sticker
+  (eggs, fresh produce…) have none.
 
 ## 2. add / update / remove — `POST .../panier.aspx?op=1`
 
@@ -155,6 +168,23 @@ the drive the Chrome session is currently logged into. `set_store` to a store th
 browser isn't on yields a "session expirée" page. Replaying Leclerc's
 "switch drive" call to rebind the session server-side is an open item (would let
 set_store switch to any drive) — see below.
+
+## 5. Usual products & shopping lists (validated 2026-10-09)
+
+Leclerc Drive has no "favourites" feature as such; the two closest are below.
+Both are server-rendered store pages (`GET`, logged-in account), with products as
+the usual `objElement` records (§1) and the cart embedded as on every page (§3).
+
+- **Usual products** — `GET .../produits-habituels.aspx`. All products in one page
+  (182 on a real account, no pagination). Only read the widget
+  `initOptions('..._pnlElementProduitHabituels', {...})`: an account with no drive
+  history gets a "Premier drive ?" page whose `..._pnlPouraientVousPlaire` widget
+  holds *recommendations*, which must not be reported as the user's products.
+- **Lists** — `GET .../mes-listes.aspx` links each list as
+  `<a id="..._hlDetailsListe" href=".../detail-liste-{id}.aspx">{name}</a>`
+  followed by "(N produit(s))". A list's products come from
+  `GET .../detail-liste-{id}.aspx`, widget `..._pnlElementProduitDetailListe`.
+  Product records carry `fAppartientAUneListe`.
 
 ## Open items / to refine
 

@@ -16,7 +16,7 @@
 import { ChromeSession, PageResponse } from "../browser.js";
 import { LeclercConfig, storePath } from "../config.js";
 import { StoreState } from "../store.js";
-import { Cart, CartItem, Product } from "../types.js";
+import { Cart, CartItem, Product, ShoppingList } from "../types.js";
 import { delay, Throttler } from "./throttle.js";
 
 /** HTTP statuses that indicate a DataDome challenge / rate-limit worth retrying. */
@@ -52,7 +52,7 @@ function assertStorePage(html: string): void {
 const ACTION_ADD = 1; // add / increase to target qty
 const ACTION_SUB = 2; // decrease / remove (qty 0)
 
-interface RawProduct {
+export interface RawProduct {
   iIdProduit: number | string;
   sLibelleLigne1?: string;
   sLibelleLigne2?: string;
@@ -68,6 +68,9 @@ interface RawProduct {
   sTotalAPayer?: string;
   sUrlVignetteProduit?: string;
   sType?: string;
+  /** Present on sticker entries (objStickers.lstProduitsStickers), not products. */
+  sTypeSticker?: string;
+  objSticker?: { sTexteAlternatif?: string };
 }
 
 /** Query token that returns no search results, so a fetched page carries only cart data. */
@@ -137,6 +140,11 @@ export class LeclercClient {
     return `${this.origin()}/${storePath(s.storeId, s.noPR)}/panier.aspx?op=1`;
   }
 
+  private pageUrl(page: string): string {
+    const s = this.store.current();
+    return `${this.origin()}/${storePath(s.storeId, s.noPR)}/${page}`;
+  }
+
   private searchUrl(query: string): string {
     const s = this.store.current();
     return `${this.origin()}/${storePath(
@@ -153,20 +161,40 @@ export class LeclercClient {
     const html = await res.text();
     assertStorePage(html);
 
-    // The search page embeds product data inside `initOptions(...)` widget
-    // calls as `{objContenu:{lstElements:[{objElement:{...iIdProduit...}}]}}`.
-    // Each `objElement` is pure JSON, so we scan the page for every product
-    // record (smallest object enclosing an `iIdProduit`) and map it.
-    const seen = new Set<string>();
-    const products: Product[] = [];
-    for (const rp of scanProductRecords(html)) {
-      if (rp.sType && rp.sType !== "Produit") continue;
-      const id = String(rp.iIdProduit);
-      if (seen.has(id)) continue;
-      seen.add(id);
-      products.push(mapProduct(rp));
-    }
-    return products;
+    return productsFromPage(html);
+  }
+
+  // ---- Usual products & shopping lists (capture doc §5) -----------------
+
+  private async storePage(page: string): Promise<string> {
+    const res = await this.send("GET", this.pageUrl(page), { Accept: "text/html" });
+    if (!res.ok) throw new Error(`${page} HTTP ${res.status} (${res.statusText})`);
+    const html = await res.text();
+    assertStorePage(html);
+    return html;
+  }
+
+  /**
+   * "Mes produits habituels": products the account usually orders. Only the
+   * dedicated widget is read — an account without history gets a
+   * "Ils pourraient vous plaire" recommendation block instead, which must not be
+   * reported as the user's products.
+   */
+  async getUsualProducts(): Promise<Product[]> {
+    const html = await this.storePage("produits-habituels.aspx");
+    return productsFromPage(html, "_pnlElementProduitHabituels");
+  }
+
+  /** The account's shopping lists ("Mes listes"), e.g. a "Favoris" list. */
+  async getLists(): Promise<ShoppingList[]> {
+    return parseLists(await this.storePage("mes-listes.aspx"));
+  }
+
+  /** Products of one shopping list. */
+  async getList(listId: string): Promise<Product[]> {
+    if (!/^\d{1,12}$/.test(listId)) throw new Error(`Identifiant de liste invalide : ${listId}`);
+    const html = await this.storePage(`detail-liste-${listId}.aspx`);
+    return productsFromPage(html, "_pnlElementProduitDetailListe");
   }
 
   // ---- Cart mutations ----------------------------------------------------
@@ -244,6 +272,7 @@ export class LeclercClient {
     assertStorePage(html);
 
     const arr = extractArrayNamed(html, "lstProduits");
+    const nutriScores = extractNutriScores(scanProductRecords(html));
     const items: CartItem[] = [];
     if (arr) {
       const seen = new Set<string>();
@@ -253,7 +282,7 @@ export class LeclercClient {
         const id = String(rp.iIdProduit);
         if (seen.has(id)) continue;
         seen.add(id);
-        const product = mapProduct(rp);
+        const product = mapProduct(rp, nutriScores);
         const lineTotal =
           num(rp.rTotalAPayer) ?? parseEuro(rp.sTotalAPayer) ?? round2(product.price * qty);
         items.push({ product, quantity: qty, lineTotal });
@@ -302,7 +331,104 @@ interface CartEvent {
   objElement?: Record<string, unknown> & Partial<RawProduct>;
 }
 
-function mapProduct(rp: RawProduct): Product {
+/**
+ * Products of a server-rendered store page (search, usual products). Product data
+ * sits in `initOptions(...)` widget calls as
+ * `{objContenu:{lstElements:[{objElement:{...iIdProduit...}}]}}`; each `objElement`
+ * is pure JSON, so we scan for every record (smallest object enclosing an
+ * `iIdProduit`). The embedded cart (`lstProduits`) is cut out first so cart lines
+ * don't leak into the results, and records without a label (cart summaries,
+ * sticker entries) are skipped.
+ */
+export function productsFromPage(html: string, widget?: string): Product[] {
+  const cart = extractArrayNamed(html, "lstProduits");
+  const page = cart ? html.replace(cart, "[]") : html;
+  // Nutri-Score stickers may sit outside the product widget: read them page-wide.
+  const nutriScores = extractNutriScores(scanProductRecords(page));
+  const scope = widget ? extractWidgetOptions(page, widget) : page;
+  if (scope === null) return [];
+  const records = scanProductRecords(scope);
+  const seen = new Set<string>();
+  const products: Product[] = [];
+  for (const rp of records) {
+    if ((rp.sType && rp.sType !== "Produit") || !rp.sLibelleLigne1) continue;
+    const id = String(rp.iIdProduit);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    products.push(mapProduct(rp, nutriScores));
+  }
+  return products;
+}
+
+/**
+ * The options object passed to a widget, i.e. the `{...}` in
+ * `initOptions('<id ending with suffix>', {...})`, or null when the page has no
+ * such widget (e.g. an empty list).
+ */
+export function extractWidgetOptions(html: string, suffix: string): string | null {
+  const re = /initOptions\('([^']+)'\s*,\s*/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (!m[1].endsWith(suffix)) continue;
+    const start = m.index + m[0].length;
+    if (html[start] !== "{") continue;
+    let depth = 0;
+    let inStr: string | null = null;
+    for (let j = start; j < html.length; j++) {
+      const c = html[j];
+      if (inStr) {
+        if (c === "\\") j++;
+        else if (c === inStr) inStr = null;
+        continue;
+      }
+      if (c === '"' || c === "'") inStr = c;
+      else if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) return html.slice(start, j + 1);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Lists from the "Mes listes" page: each one is a link
+ * `<a id="..._hlDetailsListe" href=".../detail-liste-{id}.aspx">{name}</a>`
+ * followed by its "(N produit(s))" count.
+ */
+export function parseLists(html: string): ShoppingList[] {
+  const out: ShoppingList[] = [];
+  const seen = new Set<string>();
+  const re = /<a[^>]*_hlDetailsListe"[^>]*href="[^"]*\/detail-liste-(\d+)\.aspx"[^>]*>([\s\S]*?)<\/a>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html))) {
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    const name = decodeEntities(m[2].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+    const count = /\((\d+)\s+produits?\)/.exec(html.slice(m.index, m.index + 1500));
+    out.push({ id: m[1], name: name || `Liste ${m[1]}`, productCount: count ? Number(count[1]) : undefined });
+  }
+  return out;
+}
+
+/**
+ * Nutri-Score per product id, from the page's sticker entries
+ * (`objStickers.lstProduitsStickers`, capture doc §1):
+ * `{sTypeSticker:"NUTRISCORE", iIdProduit, objSticker:{sTexteAlternatif:"Nutri Score B"}}`.
+ * "G" means the brand doesn't publish it, so only A–E are kept.
+ */
+export function extractNutriScores(records: RawProduct[]): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of records) {
+    if (r.sTypeSticker !== "NUTRISCORE") continue;
+    const m = /nutri[\s-]*score\s+([A-E])\b/i.exec(r.objSticker?.sTexteAlternatif ?? "");
+    if (m) out.set(String(r.iIdProduit), m[1].toUpperCase());
+  }
+  return out;
+}
+
+export function mapProduct(rp: RawProduct, nutriScores?: Map<string, string>): Product {
   const label = decodeEntities(
     [rp.sLibelleLigne1, rp.sLibelleLigne2].filter(Boolean).join(" ").trim(),
   );
@@ -312,6 +438,7 @@ function mapProduct(rp: RawProduct): Product {
     label: label || `Produit ${rp.iIdProduit}`,
     price,
     pricePerUnit: rp.sPrixParUniteDeMesure || undefined,
+    nutriScore: nutriScores?.get(String(rp.iIdProduit)),
     available: (num(rp.iQteDisponible) ?? 0) > 0,
     imageUrl: rp.sUrlVignetteProduit || undefined,
   };
@@ -359,7 +486,7 @@ function extractCartTotal(html: string): string | undefined {
  * non-JSON members (functions). Finds each `"iIdProduit"` occurrence and parses
  * the smallest enclosing `{...}` object, skipping any that fail to parse.
  */
-function scanProductRecords(raw: string): RawProduct[] {
+export function scanProductRecords(raw: string): RawProduct[] {
   const out: RawProduct[] = [];
   const re = /"iIdProduit"\s*:/g;
   let m: RegExpExecArray | null;

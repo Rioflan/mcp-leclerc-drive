@@ -40,3 +40,11 @@ export interface Cart {
   total: number;
   storeId: string;
 }
+
+export interface ShoppingList {
+  /** Identifier used by get_list (from the detail-liste-{id}.aspx URL). */
+  id: string;
+  name: string;
+  /** Number of products shown on the "Mes listes" page, when present. */
+  productCount?: number;
+}

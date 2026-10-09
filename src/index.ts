@@ -68,6 +68,7 @@ function formatCart(cart: Cart): string {
   const lines = cart.items.map(
     (it) =>
       `• ${it.quantity}× ${it.product.label} — ${it.lineTotal.toFixed(2)} € ` +
+      `${it.product.nutriScore ? `Nutri-Score ${it.product.nutriScore} ` : ""}` +
       `${it.product.available ? "" : "⚠️ indisponible "}(id=${it.product.id})`,
   );
   const unavailable = cart.items.filter((it) => !it.product.available).length;
@@ -161,6 +162,62 @@ server.tool(
     try {
       const cart = await client.getCart();
       return asText(formatCart(cart));
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.tool(
+  "get_usual_products",
+  "Liste les produits habituels du compte (« Mes produits habituels » sur Leclerc Drive : " +
+    "ce qu'il commande souvent) avec prix, Nutri-Score, disponibilité et l'id pour add_to_cart.",
+  {},
+  async () => {
+    try {
+      const products = await client.getUsualProducts();
+      if (products.length === 0) {
+        return asText(
+          "Aucun produit habituel : le compte doit être connecté dans Chrome et avoir déjà commandé en drive.",
+        );
+      }
+      return asText(`${products.length} produit(s) habituel(s) :\n${products.map(formatProduct).join("\n")}`);
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.tool(
+  "get_lists",
+  "Liste les listes de courses du compte (« Mes listes », ex. une liste « Favoris ») " +
+    "avec leur id à passer à get_list.",
+  {},
+  async () => {
+    try {
+      const lists = await client.getLists();
+      if (lists.length === 0) return asText("Aucune liste sur le compte.");
+      return asText(
+        lists
+          .map((l) => `• ${l.name}${l.productCount === undefined ? "" : ` (${l.productCount} produit(s))`} list_id=${l.id}`)
+          .join("\n"),
+      );
+    } catch (err) {
+      return asError(err);
+    }
+  },
+);
+
+server.tool(
+  "get_list",
+  "Affiche les produits d'une liste de courses (id donné par get_lists) avec prix, " +
+    "Nutri-Score, disponibilité et l'id pour add_to_cart.",
+  { list_id: z.string().regex(/^\d{1,12}$/).describe("Identifiant de la liste (champ list_id de get_lists)") },
+  async ({ list_id }) => {
+    try {
+      const products = await client.getList(list_id);
+      if (products.length === 0) return asText("Liste vide.");
+      return asText(`${products.length} produit(s) :\n${products.map(formatProduct).join("\n")}`);
     } catch (err) {
       return asError(err);
     }

@@ -17,6 +17,7 @@
     "inspect": "npx @modelcontextprotocol/inspector node dist/index.js",
     "smoke": "node scripts/smoke-test.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test test/",
     "prepublishOnly": "npm run build"
   },
   "keywords": [

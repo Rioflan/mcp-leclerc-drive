@@ -68,12 +68,14 @@ function formatCart(cart: Cart): string {
   const lines = cart.items.map(
     (it) =>
       `• ${it.quantity}× ${it.product.label} — ${it.lineTotal.toFixed(2)} € ` +
-      `(id=${it.product.id})`,
+      `${it.product.available ? "" : "⚠️ indisponible "}(id=${it.product.id})`,
   );
+  const unavailable = cart.items.filter((it) => !it.product.available).length;
   return (
     `Panier (magasin ${cart.storeId}) — ${cart.itemCount} article(s) :\n` +
     lines.join("\n") +
-    `\n\nTotal : ${cart.total.toFixed(2)} €`
+    `\n\nTotal : ${cart.total.toFixed(2)} €` +
+    (unavailable ? `\n⚠️ ${unavailable} référence(s) indisponible(s) dans le panier.` : "")
   );
 }
 
@@ -153,7 +155,7 @@ server.tool(
 
 server.tool(
   "get_cart",
-  "Affiche le contenu complet du panier avec le total.",
+  "Affiche le contenu complet du panier avec le total et signale les articles indisponibles (rupture de stock).",
   {},
   async () => {
     try {

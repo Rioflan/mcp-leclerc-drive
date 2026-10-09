@@ -1,0 +1,48 @@
+# Serveur MCP seul, en conteneur : Chrome + noVNC + mcp-leclerc-drive, sans
+# interface web, sans bridge et sans aucun secret à configurer.
+#
+#   docker compose -f compose.mcp.yaml up -d --build
+#   claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive
+#
+# Même nom de projet et même volume que compose.yaml : on peut passer ensuite à
+# la stack complète sans se reconnecter (arrêter celle-ci avant).
+
+name: leclerc-drive
+
+services:
+  browser:
+    build:
+      context: ..
+      dockerfile: deploy/browser/Dockerfile
+    image: leclerc-drive-browser:local
+    container_name: leclerc-drive
+    hostname: leclerc-drive
+    read_only: true
+    init: true
+    restart: unless-stopped
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    environment:
+      # Sans BRIDGE_TOKEN, le bridge HTTP n'est pas démarré.
+      LECLERC_STORE_ID: ${LECLERC_STORE_ID:-}
+      LECLERC_STORE_NOPR: ${LECLERC_STORE_NOPR:-}
+      LECLERC_HOST: ${LECLERC_HOST:-}
+    # noVNC sur la boucle locale uniquement ; le port CDP (9222) n'est pas publié.
+    ports:
+      - "127.0.0.1:${VNC_PORT:-6080}:6080"
+    volumes:
+      - browser-data:/data
+    tmpfs:
+      - /tmp:size=256m
+    mem_limit: 2g
+    pids_limit: 512
+
+volumes:
+  browser-data:

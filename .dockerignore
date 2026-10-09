@@ -1,0 +1,16 @@
+# Contexte de build de deploy/browser (racine du dépôt) : uniquement ce qui sert
+# à compiler le MCP et à assembler l'image.
+.git
+.github
+node_modules
+dist
+captures
+*.har
+*.log
+secrets.json
+.env
+.env.*
+deploy/.env
+deploy/web
+docs
+scripts

@@ -243,6 +243,8 @@ input {
 .nutri-c { background: #fecb02; color: #1b1f24; }
 .nutri-d { background: #ee8100; }
 .nutri-e { background: #e63e11; }
+/* Score venu d'Open Food Facts (et non de Leclerc) : contour pointillé. */
+.nutri-off { outline: 1.5px dashed var(--muted); outline-offset: 1.5px; }
 .alert { grid-template-columns: 1fr auto; grid-template-areas: "info btn" "status btn"; }
 .alert .buttons { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
 

@@ -179,6 +179,7 @@ export function createApp({ config, staticFiles, sessions, limiter, store, bridg
         scheduler: scheduler.status(),
         store: store_.store ?? null,
         storeError: store_.error ?? null,
+        nutriScore: store_.nutriScore ?? null,
         ntfy: notifier.describe(),
         cartWrite: config.cartWrite,
         alerts: { total: store.alerts.length, armed: store.armed().length },

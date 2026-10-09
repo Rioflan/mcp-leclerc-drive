@@ -30,6 +30,7 @@ services:
         max-size: 10m
         max-file: "3"
     environment:
+      LECLERC_OPENFOODFACTS: ${LECLERC_OPENFOODFACTS:-true}
       # Sans BRIDGE_TOKEN, le bridge HTTP n'est pas démarré.
       LECLERC_STORE_ID: ${LECLERC_STORE_ID:-}
       LECLERC_STORE_NOPR: ${LECLERC_STORE_NOPR:-}

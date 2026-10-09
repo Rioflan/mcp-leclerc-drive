@@ -5,6 +5,7 @@
 import { createServer } from "node:http";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { createLeclerc, detectStore, readCart, toProduct } from "./leclerc.mjs";
+import { NutriEnricher } from "./enricher.mjs";
 
 const PORT = Number(process.env.BRIDGE_PORT || 8000);
 const TOKEN = process.env.BRIDGE_TOKEN || "";
@@ -18,7 +19,29 @@ if (TOKEN.length < 32) {
   process.exit(1);
 }
 
-const { browser, store, client } = createLeclerc();
+const { config, browser, store, client, nutri } = createLeclerc();
+const flag = (v, fallback) => (v === undefined || v === "" ? fallback : !["0", "false", "no", "off"].includes(v.toLowerCase()));
+const enricher = flag(process.env.NUTRISCORE_ENRICH, true)
+  ? new NutriEnricher({
+      client,
+      nutri,
+      openFoodFacts: config.openFoodFacts,
+      userAgent: "mcp-leclerc-drive-deploy (+https://github.com/skunkobi/mcp-leclerc-drive)",
+    })
+  : null;
+
+/** Produits exposés : Nutri-Scores du cache, et les manquants partent en tâche de fond. */
+function exposeProducts(products, { enrich = true } = {}) {
+  nutri.reload();
+  if (enrich) enricher?.enqueue(products);
+  return products.map((p) => toProduct(nutri.apply(p)));
+}
+
+async function cartWithNutri() {
+  const cart = await readCart(client, nutri);
+  enricher?.enqueue(cart.items);
+  return cart;
+}
 const tokenDigest = createHash("sha256").update(TOKEN).digest();
 
 function authorized(req) {
@@ -83,7 +106,7 @@ const cleanQuery = (v) => (typeof v === "string" ? v.trim().slice(0, 100) : "");
  * available: null (inconnu) plutôt que false.
  */
 async function availability(items) {
-  const cart = await readCart(client);
+  const cart = await cartWithNutri();
   const known = new Map(cart.items.map((i) => [i.id, i]));
   const searched = new Map();
   const results = [];
@@ -133,13 +156,14 @@ async function route(req, url) {
   const list = /^\/lists\/([^/]+)$/.exec(pathname);
   if (["/cart", "/search", "/availability", "/usual", "/lists"].includes(pathname) || cartItem || list) await ensureStore();
 
-  if (req.method === "GET" && pathname === "/cart") return readCart(client);
+  if (req.method === "GET" && pathname === "/cart") return cartWithNutri();
 
   if (req.method === "GET" && pathname === "/search") {
     const q = cleanQuery(url.searchParams.get("q"));
     if (q.length < 2) throw new HttpError(400, "bad_request", "Recherche trop courte.");
+    // Recherche : cache appliqué, mais pas de tâche de fond (résultats éphémères, jusqu'à 200).
     const products = await client.searchProducts(q);
-    return { query: q, products: products.map(toProduct) };
+    return { query: q, products: exposeProducts(products, { enrich: false }) };
   }
 
   if (req.method === "POST" && pathname === "/availability") {
@@ -154,8 +178,7 @@ async function route(req, url) {
   }
 
   if (req.method === "GET" && pathname === "/usual") {
-    const products = await client.getUsualProducts();
-    return { products: products.map(toProduct) };
+    return { products: exposeProducts(await client.getUsualProducts()) };
   }
 
   if (req.method === "GET" && pathname === "/lists") {
@@ -164,8 +187,7 @@ async function route(req, url) {
 
   if (req.method === "GET" && list) {
     if (!isId(list[1])) throw new HttpError(400, "bad_request", "id de liste invalide.");
-    const products = await client.getList(list[1]);
-    return { id: list[1], products: products.map(toProduct) };
+    return { id: list[1], products: exposeProducts(await client.getList(list[1])) };
   }
 
   if (req.method === "PUT" && cartItem) {
@@ -178,11 +200,11 @@ async function route(req, url) {
     }
     // updateQuantity choisit le sens (ajout / retrait) et retire la ligne à 0.
     await client.updateQuantity(id, quantity);
-    return readCart(client);
+    return cartWithNutri();
   }
 
   if (req.method === "GET" && pathname === "/store") {
-    return { store: store.current() };
+    return { store: store.current(), nutriScore: enricher?.status() ?? null };
   }
 
   if (req.method === "POST" && pathname === "/store/detect") {
@@ -225,6 +247,7 @@ server.listen(PORT, () => console.error(`bridge prêt sur :${PORT}`));
 for (const sig of ["SIGTERM", "SIGINT"]) {
   process.on(sig, async () => {
     server.close();
+    enricher?.stop();
     await browser.close();
     process.exit(0);
   });

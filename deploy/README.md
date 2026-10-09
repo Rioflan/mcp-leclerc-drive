@@ -169,6 +169,12 @@ docker compose ps        # les deux services doivent passer « healthy »
 | **Alertes** | Alertes actives et notifiées : date de la dernière vérification, **Réarmer**, **Supprimer**, **Vérifier maintenant** (au plus une fois toutes les 2 minutes). |
 | **Réglages** | Magasin, fréquence, dernière erreur, test de notification. |
 
+**Nutri-Score :** les listes du site n'affichent pas toujours le Nutri-Score. Pour les produits du panier, des produits habituels et des listes qui n'en ont pas, le conteneur navigateur complète en tâche de fond, une fiche toutes les 10 à 20 s :
+1. la fiche produit Leclerc, qui le porte parfois quand la liste ne l'a pas ;
+2. sinon [Open Food Facts](https://world.openfoodfacts.org), par code-barres. Ces badges ont un contour pointillé.
+
+Le résultat est gardé en cache dans le volume (90 jours, 30 si aucun score), et partagé avec le MCP. Les produits frais, les œufs ou le café restent souvent sans score : le Nutri-Score ne les concerne pas. *Réglages* indique combien de produits sont en cours de vérification. Le premier remplissage de vos produits habituels peut prendre une demi-heure ; il n'a lieu qu'une fois.
+
 **Fonctionnement d'une alerte :**
 - À chaque vérification, le panier est lu une fois. Les produits hors panier sont retrouvés par une recherche, avec le texte saisi au moment de créer l'alerte.
 - Dès qu'un produit est disponible, une notification part et l'alerte passe à l'état **notifiée** : une alerte ne sert qu'une fois, et elle peut être réarmée.
@@ -189,6 +195,8 @@ Toutes les variables sont documentées dans [`.env.example`](.env.example). Les 
 | `NTFY_PRIORITY` | `4` | Priorité des notifications de disponibilité (1 à 5). |
 | `NOTIFY_CART_OUT_OF_STOCK` | `false` | Notifier aussi les nouvelles ruptures dans le panier. |
 | `CART_WRITE` | `true` | Autoriser l'interface à modifier le panier. `false` : interface en lecture seule, refus aussi côté bridge. |
+| `NUTRISCORE_ENRICH` | `true` | Compléter en tâche de fond les Nutri-Scores absents (voir ci-dessous). |
+| `LECLERC_OPENFOODFACTS` | `true` | Chercher ensuite sur Open Food Facts par code-barres (envoie l'EAN à OFF). Vaut aussi pour l'outil MCP `get_product`. |
 | `PUBLIC_URL` | — | URL de l'interface, ajoutée comme lien aux notifications. |
 | `SESSION_TTL` | `7d` | Durée d'une session de l'interface. |
 | `WEB_PORT` / `VNC_PORT` | `8080` / `6080` | Ports publiés, sur 127.0.0.1 uniquement. |
@@ -239,7 +247,7 @@ Le conteneur navigateur garde le nom `leclerc-drive`, pour que le MCP s'y branch
 claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive
 ```
 
-Le MCP réutilise le Chrome connecté et le magasin détecté (outil `detect_store`). `get_cart` signale les articles en rupture, `get_usual_products`, `get_lists` et `get_list` donnent les produits habituels et les listes (dont une liste « Favoris »), et le Nutri-Score figure dans toutes les listes de produits. Il peut aussi **modifier le panier** (ajout, retrait, quantités), indépendamment de `CART_WRITE`, qui ne concerne que l'interface.
+Le MCP réutilise le Chrome connecté et le magasin détecté (outil `detect_store`). `get_cart` signale les articles en rupture, `get_usual_products`, `get_lists` et `get_list` donnent les produits habituels et les listes (dont une liste « Favoris »), et le Nutri-Score figure dans toutes les listes de produits, complété par le cache décrit plus haut. `get_product` donne la fiche d'un produit : EAN, marque, origine, Nutri-Score et valeurs nutritionnelles d'Open Food Facts. Il peut aussi **modifier le panier** (ajout, retrait, quantités), indépendamment de `CART_WRITE`, qui ne concerne que l'interface.
 
 Pour ne pas valider chaque lecture, autorisez les outils en lecture seule dans `~/.claude/settings.json` (les modifications du panier continueront de demander confirmation) :
 
@@ -252,6 +260,7 @@ Pour ne pas valider chaque lecture, autorisez les outils en lecture seule dans `
       "mcp__leclerc-drive__get_usual_products",
       "mcp__leclerc-drive__get_lists",
       "mcp__leclerc-drive__get_list",
+      "mcp__leclerc-drive__get_product",
       "mcp__leclerc-drive__get_store",
       "mcp__leclerc-drive__find_stores",
       "mcp__leclerc-drive__detect_store"

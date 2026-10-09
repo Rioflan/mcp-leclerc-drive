@@ -4,6 +4,7 @@ import { loadConfig } from "../dist/config.js";
 import { ChromeSession } from "../dist/browser.js";
 import { parseStoreUrl, StoreState } from "../dist/store.js";
 import { LeclercClient } from "../dist/leclerc/client.js";
+import { NutriCache } from "../dist/nutrition.js";
 
 export function createLeclerc() {
   const config = loadConfig();
@@ -18,7 +19,9 @@ export function createLeclerc() {
   });
   const store = new StoreState(config);
   const client = new LeclercClient(config, browser, store);
-  return { config, browser, store, client };
+  // Nutri-Scores complétés (fiche produit, Open Food Facts), partagés avec le MCP.
+  const nutri = new NutriCache();
+  return { config, browser, store, client, nutri };
 }
 
 /** Ligne de panier / produit au format exposé (sans champ interne). */
@@ -31,17 +34,21 @@ export function toProduct(p) {
     available: p.available,
     imageUrl: p.imageUrl ?? null,
     nutriScore: p.nutriScore ?? null,
+    nutriScoreSource: p.nutriScoreSource ?? null,
   };
 }
 
-export async function readCart(client) {
+/** Panier lu sur le site ; les Nutri-Scores manquants sont pris dans le cache s'il est fourni. */
+export async function readCart(client, nutri) {
   const cart = await client.getCart();
+  nutri?.reload();
+  const fill = (p) => (nutri ? nutri.apply(p) : p);
   return {
     storeId: cart.storeId,
     total: cart.total,
     itemCount: cart.itemCount,
     items: cart.items.map((i) => ({
-      ...toProduct(i.product),
+      ...toProduct(fill(i.product)),
       quantity: i.quantity,
       lineTotal: i.lineTotal,
     })),

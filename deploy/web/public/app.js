@@ -202,11 +202,13 @@ function productItem(p, { query, showQuantity } = {}) {
   const status = node.querySelector(".status");
   status.append(p.available ? pill("Disponible", "ok") : pill("En rupture", "ko"));
   if (/^[A-E]$/.test(p.nutriScore ?? "")) {
+    const off = p.nutriScoreSource === "openfoodfacts";
+    const title = `Nutri-Score ${p.nutriScore}${off ? " (Open Food Facts)" : ""}`;
     status.append(
       el("span", {
-        className: `nutri nutri-${p.nutriScore.toLowerCase()}`,
+        className: `nutri nutri-${p.nutriScore.toLowerCase()}${off ? " nutri-off" : ""}`,
         text: p.nutriScore,
-        attrs: { title: `Nutri-Score ${p.nutriScore}`, "aria-label": `Nutri-Score ${p.nutriScore}` },
+        attrs: { title, "aria-label": title },
       }),
     );
   }
@@ -389,6 +391,9 @@ function renderSettings() {
     ["Prochaine vérification", sch.running ? "en cours" : relTime(sch.nextRunAt)],
     ["Dernière erreur", sch.lastError ? `${sch.lastError} (${sch.consecutiveFailures} échec(s) d'affilée)` : "aucune"],
     ["Notifications", s.ntfy],
+    ...(s.nutriScore
+      ? [["Nutri-Score", s.nutriScore.queued ? `${s.nutriScore.queued} produit(s) en cours de vérification (fiche Leclerc, puis Open Food Facts)` : "à jour"]]
+      : []),
   ];
   for (const [k, v] of rows) dl.append(el("dt", { text: k }), el("dd", { text: v }));
   $("#store-name").textContent = s.store?.name ? `Drive ${s.store.name}` : "";

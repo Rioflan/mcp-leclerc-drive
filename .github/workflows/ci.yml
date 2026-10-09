@@ -1,0 +1,97 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mcp:
+    name: Serveur MCP
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm run build
+
+  web:
+    name: Service web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Tests
+        working-directory: deploy/web
+        run: npm test
+      - name: Syntaxe des modules du bridge
+        run: for f in deploy/browser/src/*.mjs; do node --check "$f"; done
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: ShellCheck
+        run: shellcheck deploy/browser/*.sh deploy/scripts/*.sh
+      - name: Hadolint (navigateur)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/browser/Dockerfile
+          # DL3008 : versions apt non épinglées (Chrome n'existe qu'en dernière version).
+          ignore: DL3008
+      - name: Hadolint (web)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: deploy/web/Dockerfile
+      - name: Compose valide
+        working-directory: deploy
+        run: |
+          cp .env.example .env
+          sed -i -e 's/^BRIDGE_TOKEN=.*/BRIDGE_TOKEN=x/' -e 's/^UI_PASSWORD_HASH=.*/UI_PASSWORD_HASH=x/' -e 's/^NTFY_TOPIC=.*/NTFY_TOPIC=x/' .env
+          docker compose config -q
+          docker compose --profile selfhosted-ntfy config -q
+          docker compose -f compose.mcp.yaml --env-file /dev/null config -q
+
+  images:
+    name: Images Docker
+    runs-on: ubuntu-latest
+    needs: [mcp, web, lint]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Image navigateur (compile le MCP depuis src/)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/browser/Dockerfile
+          push: false
+          cache-from: type=gha,scope=browser
+          cache-to: type=gha,mode=max,scope=browser
+      - name: Image web (exécute aussi les tests)
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/web
+          push: false
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web

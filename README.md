@@ -91,6 +91,10 @@ The easiest way: just **ask, in the conversation**. No env vars required.
 > "cherche du lait"                  → runs on that store
 ```
 
+Already on your drive in the server's Chrome window? `detect_store` reads the
+store straight from the open tab — including piéton relays, whose delivery point
+and retrieval point differ (`magasin-<id>-<noPR>-…`).
+
 `set_store` persists your choice to `~/.mcp-leclerc-drive/config.json`, so it
 sticks across sessions, and it resolves the correct backend host for you (the
 `fdN` prefix genuinely varies per store — `fd8`, `fd9`, `fd14`…).
@@ -101,7 +105,8 @@ sticks across sessions, and it resolves the correct backend host for you (the
 > drive your browser isn't on will return a "session expired" error.
 
 You can still hard-set the store via `LECLERC_STORE_ID` / `LECLERC_HOST` env vars
-if you prefer (e.g. for headless deploys). To find them manually: your Drive URL
+if you prefer (e.g. for headless deploys), or call `set_store` with `host` and
+`no_pr` for a store that `find_stores` doesn't list. To find them manually: your Drive URL
 looks like `https://fd9-courses.leclercdrive.fr/magasin-053701-053701-Your-Town/`
 — the 6-digit number is the store id, the `fdN-courses.leclercdrive.fr` part is
 the host.
@@ -131,6 +136,39 @@ Or in a Claude Desktop config:
 No env needed — pick your store in-conversation with `find_stores` / `set_store`.
 On first use a Chrome window opens: log into Leclerc Drive once and you're set.
 
+## Docker deployment & restock alerts
+
+[`deploy/`](deploy/README.md) runs the whole thing in hardened containers, with
+the MCP server built from this repository's `src/`:
+
+- **browser**: Chrome in a virtual display (log in once via noVNC on
+  `127.0.0.1:6080`), the MCP server (`docker exec -i leclerc-drive mcp-leclerc-drive`)
+  and an internal, read-only HTTP bridge.
+- **web**: a password-protected UI on `127.0.0.1:8080` — cart, out-of-stock tab,
+  product search, one-click restock alerts — and a scheduler that sends
+  [ntfy](https://ntfy.sh) notifications when a watched product is back in stock
+  (configurable interval + random jitter, no LLM involved).
+- Optional self-hosted ntfy server.
+
+```bash
+cd deploy && cp .env.example .env   # fill in the secrets, see deploy/README.md
+docker compose up -d --build
+```
+
+**MCP server only**, containerized (no UI, no alerts, no secrets, no local Chrome
+install):
+
+```bash
+cd deploy && docker compose -f compose.mcp.yaml up -d --build
+claude mcp add leclerc-drive -- docker exec -i leclerc-drive mcp-leclerc-drive
+```
+
+Log into Leclerc Drive once via noVNC (http://127.0.0.1:6080/vnc.html, password:
+`docker exec leclerc-drive cat /data/.vnc/password.txt`), open your drive, then
+ask Claude to run `detect_store`.
+
+Full documentation (in French): [deploy/README.md](deploy/README.md).
+
 ## Development
 
 ```bash
@@ -154,6 +192,7 @@ src/
     throttle.ts     # request serialization + spacing + retry (hygiene)
 docs/
   api-capture.md    # the reverse-engineered Leclerc Drive API
+deploy/             # Docker stack: browser + MCP + bridge, web UI + ntfy alerts
 ```
 
 ## Contributing

@@ -1,0 +1,155 @@
+# Leclerc Drive : navigateur connecté (Chrome + noVNC + MCP + bridge) et
+# interface d'alertes de réapprovisionnement (ntfy).
+# Configuration : copier .env.example en .env et le remplir (voir README).
+# Commandes à lancer depuis ce dossier (deploy/).
+
+# Nom de projet fixe : volumes et réseaux ne dépendent pas du nom du dossier.
+name: leclerc-drive
+
+x-hardening: &hardening
+  read_only: true
+  init: true
+  restart: unless-stopped
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  browser:
+    <<: *hardening
+    # Contexte = racine du dépôt : le serveur MCP est compilé depuis src/.
+    build:
+      context: ..
+      dockerfile: deploy/browser/Dockerfile
+    image: leclerc-drive-browser:local
+    # Nom fixe : le serveur MCP s'y branche avec `docker exec -i leclerc-drive mcp-leclerc-drive`.
+    container_name: leclerc-drive
+    hostname: leclerc-drive
+    environment:
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:?BRIDGE_TOKEN manquant dans .env}
+      LECLERC_STORE_ID: ${LECLERC_STORE_ID:-}
+      LECLERC_STORE_NOPR: ${LECLERC_STORE_NOPR:-}
+      LECLERC_HOST: ${LECLERC_HOST:-}
+    # noVNC (connexion à Leclerc Drive) sur la boucle locale uniquement.
+    # Le bridge (8000) et le port CDP de Chrome (9222) ne sont jamais publiés.
+    ports:
+      - "127.0.0.1:${VNC_PORT:-6080}:6080"
+    volumes:
+      - browser-data:/data
+    tmpfs:
+      - /tmp:size=256m
+    networks:
+      - internal
+      - egress
+    mem_limit: 2g
+    pids_limit: 512
+
+  web:
+    <<: *hardening
+    build: ./web
+    image: leclerc-drive-web:local
+    environment:
+      UI_PASSWORD_HASH: ${UI_PASSWORD_HASH:?UI_PASSWORD_HASH manquant dans .env}
+      UI_SECURE_COOKIE: ${UI_SECURE_COOKIE:-false}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      SESSION_TTL: ${SESSION_TTL:-7d}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      BRIDGE_URL: http://browser:8000
+      BRIDGE_TOKEN: ${BRIDGE_TOKEN:?BRIDGE_TOKEN manquant dans .env}
+      CHECK_INTERVAL: ${CHECK_INTERVAL:-30m}
+      CHECK_JITTER: ${CHECK_JITTER:-10m}
+      FAILURE_THRESHOLD: ${FAILURE_THRESHOLD:-3}
+      NOTIFY_CART_OUT_OF_STOCK: ${NOTIFY_CART_OUT_OF_STOCK:-false}
+      NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:?NTFY_TOPIC manquant dans .env}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      NTFY_PRIORITY: ${NTFY_PRIORITY:-4}
+    ports:
+      - "127.0.0.1:${WEB_PORT:-8080}:8080"
+    volumes:
+      - web-data:/data
+    tmpfs:
+      - /tmp:size=16m
+    networks:
+      - internal
+      - egress
+    depends_on:
+      browser:
+        condition: service_healthy
+    mem_limit: 256m
+    pids_limit: 64
+
+  # Serveur ntfy auto-hébergé (optionnel) : docker compose --profile selfhosted-ntfy up -d
+  # Mettre alors NTFY_URL=http://ntfy:8080 dans .env (le web le joint par le réseau interne).
+  # ntfy-init donne le volume à l'utilisateur non-root de ntfy, puis s'arrête.
+  ntfy-init:
+    image: binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f
+    profiles:
+      - selfhosted-ntfy
+    entrypoint: ["chown", "1000:1000", "/var/lib/ntfy"]
+    user: "0:0"
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+
+  ntfy:
+    <<: *hardening
+    image: binwiederhier/ntfy:v2.29.0@sha256:4c599cf0818965782f93f652bd843e92714992e84d6b88ad17713dc0951cda1f
+    profiles:
+      - selfhosted-ntfy
+    command: serve
+    user: "1000:1000"
+    environment:
+      NTFY_BASE_URL: ${NTFY_PUBLIC_URL:-http://localhost:8090}
+      NTFY_LISTEN_HTTP: ":8080"
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      NTFY_AUTH_FILE: /var/lib/ntfy/user.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_BEHIND_PROXY: ${NTFY_BEHIND_PROXY:-false}
+      NTFY_ENABLE_LOGIN: "true"
+    ports:
+      - "${NTFY_BIND:-127.0.0.1}:${NTFY_PORT:-8090}:8080"
+    volumes:
+      - ntfy-data:/var/lib/ntfy
+    tmpfs:
+      - /tmp:size=16m
+    networks:
+      internal:
+        aliases:
+          - ntfy
+      egress: {}
+    depends_on:
+      ntfy-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 3 -O- http://127.0.0.1:8080/v1/health | grep -q '\"healthy\":true'"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+    pids_limit: 64
+
+networks:
+  # Réseau privé navigateur ↔ web ↔ ntfy, sans accès à Internet ni à l'hôte.
+  internal:
+    internal: true
+  # Sortie Internet : Leclerc Drive (navigateur), ntfy.sh (web), push mobile (ntfy).
+  egress: {}
+
+volumes:
+  browser-data:
+  web-data:
+  ntfy-data:

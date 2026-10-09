@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Alertes Drive</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <main id="login" class="login" hidden>
+    <form id="login-form" class="card login-card">
+      <h1>Alertes Drive</h1>
+      <p class="muted">Panier et alertes de réapprovisionnement Leclerc Drive.</p>
+      <label for="password">Mot de passe</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <button type="submit" class="primary">Se connecter</button>
+      <p id="login-error" class="error" role="alert"></p>
+    </form>
+  </main>
+
+  <div id="app" hidden>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-name">Alertes Drive</span>
+        <span id="store-name" class="muted"></span>
+      </div>
+      <nav class="tabs" role="tablist">
+        <a href="#panier" role="tab" data-tab="panier">Panier</a>
+        <a href="#ruptures" role="tab" data-tab="ruptures">Ruptures <span id="badge-ruptures" class="badge" hidden></span></a>
+        <a href="#recherche" role="tab" data-tab="recherche">Recherche</a>
+        <a href="#alertes" role="tab" data-tab="alertes">Alertes <span id="badge-alertes" class="badge" hidden></span></a>
+        <a href="#reglages" role="tab" data-tab="reglages">Réglages</a>
+      </nav>
+      <button id="logout" class="ghost" type="button">Déconnexion</button>
+    </header>
+
+    <div id="flash" class="flash" role="status" hidden></div>
+
+    <section id="tab-panier" class="tab" hidden>
+      <div class="section-head">
+        <h2>Panier</h2>
+        <button class="ghost" type="button" data-action="reload-cart">Actualiser</button>
+      </div>
+      <p id="cart-summary" class="muted"></p>
+      <ul id="cart-list" class="products"></ul>
+    </section>
+
+    <section id="tab-ruptures" class="tab" hidden>
+      <div class="section-head">
+        <h2>Articles en rupture</h2>
+        <button class="ghost" type="button" data-action="reload-cart">Actualiser</button>
+      </div>
+      <p id="oos-summary" class="muted"></p>
+      <ul id="oos-list" class="products"></ul>
+    </section>
+
+    <section id="tab-recherche" class="tab" hidden>
+      <h2>Rechercher un produit</h2>
+      <form id="search-form" class="search">
+        <input id="search-q" type="search" placeholder="ex. oeufs bio, fromage frais 0%" minlength="2" maxlength="100" required>
+        <button type="submit" class="primary">Rechercher</button>
+      </form>
+      <p id="search-summary" class="muted"></p>
+      <ul id="search-list" class="products"></ul>
+    </section>
+
+    <section id="tab-alertes" class="tab" hidden>
+      <div class="section-head">
+        <h2>Alertes</h2>
+        <button class="ghost" type="button" data-action="check-now">Vérifier maintenant</button>
+      </div>
+      <p id="alerts-summary" class="muted"></p>
+      <ul id="alerts-list" class="alerts"></ul>
+    </section>
+
+    <section id="tab-reglages" class="tab" hidden>
+      <h2>Réglages</h2>
+      <dl id="settings" class="settings"></dl>
+      <div class="actions">
+        <button class="ghost" type="button" data-action="detect-store">Détecter mon magasin</button>
+        <button class="ghost" type="button" data-action="test-notify">Envoyer une notification de test</button>
+      </div>
+      <p class="muted small">Le magasin est lu dans l'onglet Leclerc Drive ouvert dans le VNC du conteneur navigateur.</p>
+    </section>
+  </div>
+
+  <template id="product-tpl">
+    <li class="product">
+      <img class="thumb" alt="" loading="lazy" referrerpolicy="no-referrer">
+      <div class="info">
+        <span class="label"></span>
+        <span class="meta muted"></span>
+      </div>
+      <span class="status"></span>
+      <button type="button" class="alert-btn"></button>
+    </li>
+  </template>
+</body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "leclerc-drive-web",
+  "private": true,
+  "description": "Interface et alertes de réapprovisionnement Leclerc Drive (ntfy)",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/main.mjs",
+    "test": "node --test test/*.test.mjs",
+    "hash-password": "node src/hash-password.mjs"
+  }
+}

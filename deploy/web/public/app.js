@@ -194,7 +194,10 @@ function productItem(p, { query, showQuantity } = {}) {
   else img.remove();
 
   node.querySelector(".label").textContent = p.label;
-  const price = showQuantity ? `${p.quantity} × ${eur(p.price)} = ${eur(p.lineTotal)}` : eur(p.price);
+  // Ligne du panier : suit la quantité affichée (y compris en attente d'envoi).
+  const qty = shownQuantity(p.id);
+  const lineTotal = qty === p.quantity ? p.lineTotal : Math.round(qty * p.price * 100) / 100;
+  const price = showQuantity ? `${qty} × ${eur(p.price)} = ${eur(lineTotal)}` : eur(p.price);
   node.querySelector(".meta").textContent = [price, p.pricePerUnit].filter(Boolean).join(" · ");
   const status = node.querySelector(".status");
   status.append(p.available ? pill("Disponible", "ok") : pill("En rupture", "ko"));

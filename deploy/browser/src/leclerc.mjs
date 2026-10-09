@@ -30,6 +30,7 @@ export function toProduct(p) {
     pricePerUnit: p.pricePerUnit ?? null,
     available: p.available,
     imageUrl: p.imageUrl ?? null,
+    nutriScore: p.nutriScore ?? null,
   };
 }
 

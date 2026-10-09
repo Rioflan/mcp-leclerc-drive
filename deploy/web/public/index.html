@@ -31,6 +31,7 @@
         <a href="#panier" role="tab" data-tab="panier">Panier</a>
         <a href="#ruptures" role="tab" data-tab="ruptures">Ruptures <span id="badge-ruptures" class="badge" hidden></span></a>
         <a href="#recherche" role="tab" data-tab="recherche">Recherche</a>
+        <a href="#favoris" role="tab" data-tab="favoris">Favoris</a>
         <a href="#alertes" role="tab" data-tab="alertes">Alertes <span id="badge-alertes" class="badge" hidden></span></a>
         <a href="#reglages" role="tab" data-tab="reglages">Réglages</a>
       </nav>
@@ -67,6 +68,17 @@
       <ul id="search-list" class="products"></ul>
     </section>
 
+    <section id="tab-favoris" class="tab" hidden>
+      <div class="section-head">
+        <h2>Favoris</h2>
+        <button class="ghost" type="button" data-action="reload-favorites">Actualiser</button>
+      </div>
+      <div id="fav-sources" class="chips" role="group" aria-label="Source"></div>
+      <input id="fav-filter" type="search" placeholder="Filtrer…" maxlength="100" aria-label="Filtrer les produits">
+      <p id="favorites-summary" class="muted"></p>
+      <ul id="favorites-list" class="products"></ul>
+    </section>
+
     <section id="tab-alertes" class="tab" hidden>
       <div class="section-head">
         <h2>Alertes</h2>
@@ -95,7 +107,10 @@
         <span class="meta muted"></span>
       </div>
       <span class="status"></span>
-      <button type="button" class="alert-btn"></button>
+      <div class="product-actions">
+        <div class="cart-ctl"></div>
+        <button type="button" class="alert-btn"></button>
+      </div>
     </li>
   </template>
 </body>

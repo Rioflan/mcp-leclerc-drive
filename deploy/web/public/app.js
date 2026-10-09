@@ -2,7 +2,7 @@
 // textContent (jamais innerHTML) : un libellé produit ne peut pas injecter de HTML.
 
 const $ = (sel) => document.querySelector(sel);
-const TABS = ["panier", "ruptures", "recherche", "alertes", "reglages"];
+const TABS = ["panier", "ruptures", "recherche", "favoris", "alertes", "reglages"];
 
 const state = {
   csrf: null,
@@ -11,7 +11,17 @@ const state = {
   alerts: [],
   status: null,
   search: null,
+  // Favoris : produits habituels ("usual") ou une liste du compte (id).
+  lists: null,
+  favSource: null,
+  favorites: null,
+  favoritesError: null,
 };
+
+const QTY_DEBOUNCE_MS = 600;
+const MAX_QUANTITY = 99;
+/** Quantités cibles en attente d'envoi, par id produit : { target, timer }. */
+const pending = new Map();
 
 // ---------- API ----------
 
@@ -83,6 +93,7 @@ const ERROR_HINTS = {
   store_not_configured: "Aucun magasin configuré : connecte-toi dans le VNC puis « Détecter mon magasin » dans Réglages.",
   blocked: "Le site a bloqué la requête (anti-bot). Réessaie dans quelques minutes.",
   bridge_unreachable: "Le conteneur navigateur ne répond pas.",
+  cart_write_disabled: "La modification du panier est désactivée (CART_WRITE=false).",
 };
 const explain = (err) => ERROR_HINTS[err.code] || err.message;
 
@@ -120,6 +131,60 @@ async function createAlert(product, query, button) {
   renderAll();
 }
 
+// ---------- Panier : quantités ----------
+
+const canEditCart = () => state.status?.cartWrite === true && state.cart !== null;
+const cartQuantity = (id) => state.cart?.items.find((i) => i.id === id)?.quantity ?? 0;
+const shownQuantity = (id) => (pending.has(id) ? pending.get(id).target : cartQuantity(id));
+
+/**
+ * Change la quantité affichée tout de suite et n'envoie que la valeur finale après
+ * une courte pause : chaque envoi coûte des requêtes au site (espacées par le throttle).
+ */
+function setQuantity(id, target) {
+  const q = Math.max(0, Math.min(MAX_QUANTITY, target));
+  clearTimeout(pending.get(id)?.timer);
+  const timer = setTimeout(() => sendQuantity(id, q), QTY_DEBOUNCE_MS);
+  pending.set(id, { target: q, timer, sending: false });
+  renderAll();
+}
+
+async function sendQuantity(id, quantity) {
+  const entry = pending.get(id);
+  if (!entry || entry.target !== quantity) return;
+  entry.sending = true;
+  try {
+    if (quantity !== cartQuantity(id)) state.cart = await api("PUT", `/api/cart/items/${id}`, { quantity });
+  } catch (err) {
+    flash(explain(err), true);
+  }
+  // Une nouvelle valeur a pu être demandée pendant l'envoi : elle a son propre minuteur.
+  if (pending.get(id) === entry) pending.delete(id);
+  renderAll();
+}
+
+function cartControls(p) {
+  if (!canEditCart()) return null;
+  const qty = shownQuantity(p.id);
+  if (qty === 0) {
+    if (!p.available) return null;
+    const add = el("button", { className: "primary", text: "Ajouter", attrs: { type: "button" } });
+    add.addEventListener("click", () => setQuantity(p.id, 1));
+    return add;
+  }
+  const minus = el("button", { text: "−", attrs: { type: "button", "aria-label": qty === 1 ? "Retirer du panier" : "Diminuer" } });
+  const plus = el("button", { text: "+", attrs: { type: "button", "aria-label": "Augmenter" } });
+  minus.addEventListener("click", () => setQuantity(p.id, shownQuantity(p.id) - 1));
+  plus.addEventListener("click", () => setQuantity(p.id, shownQuantity(p.id) + 1));
+  plus.disabled = qty >= MAX_QUANTITY;
+  const stepper = el("span", { className: `stepper${pending.has(p.id) ? " is-pending" : ""}` }, [
+    minus,
+    el("span", { className: "qty", text: String(qty), attrs: { "aria-live": "polite" } }),
+    plus,
+  ]);
+  return stepper;
+}
+
 // ---------- Rendu ----------
 
 function productItem(p, { query, showQuantity } = {}) {
@@ -131,7 +196,20 @@ function productItem(p, { query, showQuantity } = {}) {
   node.querySelector(".label").textContent = p.label;
   const price = showQuantity ? `${p.quantity} × ${eur(p.price)} = ${eur(p.lineTotal)}` : eur(p.price);
   node.querySelector(".meta").textContent = [price, p.pricePerUnit].filter(Boolean).join(" · ");
-  node.querySelector(".status").append(p.available ? pill("Disponible", "ok") : pill("En rupture", "ko"));
+  const status = node.querySelector(".status");
+  status.append(p.available ? pill("Disponible", "ok") : pill("En rupture", "ko"));
+  if (/^[A-E]$/.test(p.nutriScore ?? "")) {
+    status.append(
+      el("span", {
+        className: `nutri nutri-${p.nutriScore.toLowerCase()}`,
+        text: p.nutriScore,
+        attrs: { title: `Nutri-Score ${p.nutriScore}`, "aria-label": `Nutri-Score ${p.nutriScore}` },
+      }),
+    );
+  }
+
+  const ctl = cartControls(p);
+  if (ctl) node.querySelector(".cart-ctl").append(ctl);
 
   const btn = node.querySelector(".alert-btn");
   if (alertFor(p.id)) {
@@ -191,6 +269,41 @@ function renderSearch() {
     ? `${s.products.length} résultat(s) pour « ${s.query} ».`
     : `Aucun résultat pour « ${s.query} ».`;
   list.append(...s.products.map((p) => productItem(p, { query: s.query })));
+}
+
+const USUAL = "usual";
+let favoritesStarted = false;
+const norm = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+function renderFavorites() {
+  const sources = $("#fav-sources");
+  sources.replaceChildren();
+  const entries = [[USUAL, "Produits habituels"], ...(state.lists ?? []).map((l) => [l.id, l.productCount === undefined ? l.name : `${l.name} (${l.productCount})`])];
+  for (const [id, label] of entries) {
+    const b = el("button", { text: label, attrs: { type: "button", "aria-pressed": String(state.favSource === id) } });
+    b.addEventListener("click", () => {
+      if (state.favSource !== id) loadFavorites(id);
+    });
+    sources.append(b);
+  }
+
+  const list = $("#favorites-list");
+  list.replaceChildren();
+  if (state.favoritesError) {
+    $("#favorites-summary").textContent = explain(state.favoritesError);
+    return;
+  }
+  const f = state.favorites;
+  if (!f) return;
+  const q = norm($("#fav-filter").value.trim());
+  const shown = q ? f.products.filter((p) => norm(p.label).includes(q)) : f.products;
+  const what = state.favSource === USUAL ? "produit(s) habituel(s)" : "produit(s) dans la liste";
+  $("#favorites-summary").textContent = f.products.length
+    ? `${q ? `${shown.length} sur ` : ""}${f.products.length} ${what}.`
+    : state.favSource === USUAL
+      ? "Aucun produit habituel : le compte doit être connecté dans le VNC et avoir déjà commandé en drive."
+      : "Liste vide.";
+  list.append(...shown.map((p) => productItem(p)));
 }
 
 function renderAlerts() {
@@ -281,6 +394,7 @@ function renderSettings() {
 function renderAll() {
   renderCart();
   renderSearch();
+  renderFavorites();
   renderAlerts();
   renderSettings();
 }
@@ -297,6 +411,27 @@ async function loadCart() {
     state.cartError = err;
   }
   renderAll();
+}
+
+/** Charge les listes (une fois) puis la source choisie ; par défaut une liste « Favoris » si elle existe. */
+async function loadFavorites(source, { reloadLists = false } = {}) {
+  state.favorites = null;
+  state.favoritesError = null;
+  $("#favorites-summary").textContent = "Chargement…";
+  $("#favorites-list").replaceChildren();
+  try {
+    if (!state.lists || reloadLists) {
+      state.lists = (await api("GET", "/api/lists")).lists;
+    }
+    const fav = state.lists.find((l) => /favori/i.test(l.name));
+    state.favSource = source ?? state.favSource ?? fav?.id ?? USUAL;
+    if (state.favSource !== USUAL && !state.lists.some((l) => l.id === state.favSource)) state.favSource = USUAL;
+    renderFavorites();
+    state.favorites = await api("GET", state.favSource === USUAL ? "/api/usual" : `/api/lists/${state.favSource}`);
+  } catch (err) {
+    state.favoritesError = err;
+  }
+  renderFavorites();
 }
 
 async function loadAlerts() {
@@ -325,6 +460,11 @@ function showTab() {
     document.querySelector(`[data-tab="${t}"]`).setAttribute("aria-selected", String(t === current));
   }
   if (current === "recherche") $("#search-q").focus();
+  // Chargés à la première ouverture seulement : chaque lecture interroge le site.
+  if (current === "favoris" && !favoritesStarted && !$("#app").hidden) {
+    favoritesStarted = true;
+    loadFavorites();
+  }
 }
 
 function showLogin() {
@@ -386,6 +526,7 @@ $("#search-form").addEventListener("submit", async (e) => {
 
 const ACTIONS = {
   "reload-cart": () => loadCart(),
+  "reload-favorites": () => loadFavorites(undefined, { reloadLists: true }),
   "check-now": async () => {
     try {
       const { result } = await api("POST", "/api/check");
@@ -420,6 +561,8 @@ document.addEventListener("click", (e) => {
   const btn = e.target.closest("[data-action]");
   if (btn && ACTIONS[btn.dataset.action]) busy(btn, ACTIONS[btn.dataset.action]);
 });
+
+$("#fav-filter").addEventListener("input", () => renderFavorites());
 
 window.addEventListener("hashchange", showTab);
 

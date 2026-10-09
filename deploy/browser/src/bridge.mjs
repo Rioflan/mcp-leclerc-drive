@@ -1,6 +1,7 @@
-// Bridge HTTP interne : expose au conteneur web une API minimale, en lecture
-// seule pour le panier (aucune mutation). Il n'est joignable que sur le réseau
-// Docker interne et chaque requête doit porter BRIDGE_TOKEN.
+// Bridge HTTP interne : expose au conteneur web une API minimale. La seule
+// écriture possible est la quantité d'une ligne du panier (jamais de commande ni
+// de paiement), et elle se coupe avec CART_WRITE=false. Il n'est joignable que
+// sur le réseau Docker interne et chaque requête doit porter BRIDGE_TOKEN.
 import { createServer } from "node:http";
 import { timingSafeEqual, createHash } from "node:crypto";
 import { createLeclerc, detectStore, readCart, toProduct } from "./leclerc.mjs";
@@ -9,6 +10,8 @@ const PORT = Number(process.env.BRIDGE_PORT || 8000);
 const TOKEN = process.env.BRIDGE_TOKEN || "";
 const MAX_BODY = 16 * 1024;
 const MAX_ITEMS = 100;
+const MAX_QUANTITY = 99;
+const CART_WRITE = !["0", "false", "no", "off"].includes(String(process.env.CART_WRITE ?? "true").toLowerCase());
 
 if (TOKEN.length < 32) {
   console.error("bridge: BRIDGE_TOKEN manquant ou trop court (32 caractères minimum).");
@@ -126,7 +129,9 @@ async function ensureStore() {
 
 async function route(req, url) {
   const { pathname } = url;
-  if (["/cart", "/search", "/availability"].includes(pathname)) await ensureStore();
+  const cartItem = /^\/cart\/items\/([^/]+)$/.exec(pathname);
+  const list = /^\/lists\/([^/]+)$/.exec(pathname);
+  if (["/cart", "/search", "/availability", "/usual", "/lists"].includes(pathname) || cartItem || list) await ensureStore();
 
   if (req.method === "GET" && pathname === "/cart") return readCart(client);
 
@@ -146,6 +151,34 @@ async function route(req, url) {
     const items = raw.map((i) => ({ id: i?.id, query: cleanQuery(i?.query) }));
     if (!items.every((i) => isId(i.id))) throw new HttpError(400, "bad_request", "id invalide.");
     return availability(items);
+  }
+
+  if (req.method === "GET" && pathname === "/usual") {
+    const products = await client.getUsualProducts();
+    return { products: products.map(toProduct) };
+  }
+
+  if (req.method === "GET" && pathname === "/lists") {
+    return { lists: await client.getLists() };
+  }
+
+  if (req.method === "GET" && list) {
+    if (!isId(list[1])) throw new HttpError(400, "bad_request", "id de liste invalide.");
+    const products = await client.getList(list[1]);
+    return { id: list[1], products: products.map(toProduct) };
+  }
+
+  if (req.method === "PUT" && cartItem) {
+    if (!CART_WRITE) throw new HttpError(403, "cart_write_disabled", "Modification du panier désactivée (CART_WRITE=false).");
+    const id = cartItem[1];
+    const { quantity } = (await readJson(req)) ?? {};
+    if (!isId(id)) throw new HttpError(400, "bad_request", "id invalide.");
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QUANTITY) {
+      throw new HttpError(400, "bad_request", `quantity : entier de 0 à ${MAX_QUANTITY}.`);
+    }
+    // updateQuantity choisit le sens (ajout / retrait) et retire la ligne à 0.
+    await client.updateQuantity(id, quantity);
+    return readCart(client);
   }
 
   if (req.method === "GET" && pathname === "/store") {

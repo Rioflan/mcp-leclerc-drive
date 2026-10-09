@@ -33,6 +33,7 @@ services:
     hostname: leclerc-drive
     environment:
       BRIDGE_TOKEN: ${BRIDGE_TOKEN:?BRIDGE_TOKEN manquant dans .env}
+      CART_WRITE: ${CART_WRITE:-true}
       LECLERC_STORE_ID: ${LECLERC_STORE_ID:-}
       LECLERC_STORE_NOPR: ${LECLERC_STORE_NOPR:-}
       LECLERC_HOST: ${LECLERC_HOST:-}
@@ -66,6 +67,7 @@ services:
       CHECK_JITTER: ${CHECK_JITTER:-10m}
       FAILURE_THRESHOLD: ${FAILURE_THRESHOLD:-3}
       NOTIFY_CART_OUT_OF_STOCK: ${NOTIFY_CART_OUT_OF_STOCK:-false}
+      CART_WRITE: ${CART_WRITE:-true}
       NTFY_URL: ${NTFY_URL:-https://ntfy.sh}
       NTFY_TOPIC: ${NTFY_TOPIC:?NTFY_TOPIC manquant dans .env}
       NTFY_TOKEN: ${NTFY_TOKEN:-}

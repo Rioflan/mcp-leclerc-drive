@@ -46,6 +46,7 @@ export function loadConfig(env = process.env) {
     checkJitterMs: check(() => parseDuration(env.CHECK_JITTER || "10m")),
     failureThreshold: check(() => int("FAILURE_THRESHOLD", env.FAILURE_THRESHOLD, 3, 1, 100)),
     notifySummary: bool(env.NOTIFY_CART_OUT_OF_STOCK),
+    cartWrite: bool(env.CART_WRITE, true),
     ntfy: {
       url: (env.NTFY_URL || "https://ntfy.sh").replace(/\/+$/, ""),
       topic: env.NTFY_TOPIC || "",

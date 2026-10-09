@@ -52,6 +52,22 @@ export function fakeBridge() {
       const items = this.cartOutOfStock.map((i) => ({ ...i, available: false, price: 1, quantity: 1, lineTotal: 1 }));
       return { items, total: items.length, itemCount: items.length };
     },
+    quantities: new Map(),
+    async usual() {
+      return { products: [{ id: "42", label: "Habituel", price: 3, available: true, nutriScore: "B" }] };
+    },
+    async lists() {
+      return { lists: [{ id: "7", name: "Favoris", productCount: 1 }] };
+    },
+    async list(id) {
+      return { id, products: [{ id: "43", label: "Oeufs", price: 4, available: true, nutriScore: null }] };
+    },
+    async setQuantity(id, quantity) {
+      if (quantity === 0) this.quantities.delete(id);
+      else this.quantities.set(id, quantity);
+      const items = [...this.quantities].map(([i, q]) => ({ id: i, label: `Produit ${i}`, available: true, price: 1, quantity: q, lineTotal: q }));
+      return { items, total: items.reduce((s, i) => s + i.lineTotal, 0), itemCount: items.length };
+    },
     async search(q) {
       return { query: q, products: [] };
     },

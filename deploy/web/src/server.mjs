@@ -79,6 +79,7 @@ async function readJson(req) {
 
 const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 const isProductId = (v) => typeof v === "string" && /^\d{1,12}$/.test(v);
+const MAX_QUANTITY = 99;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 export function createApp({ config, staticFiles, sessions, limiter, store, bridge, notifier, scheduler, log = console }) {
@@ -179,6 +180,7 @@ export function createApp({ config, staticFiles, sessions, limiter, store, bridg
         store: store_.store ?? null,
         storeError: store_.error ?? null,
         ntfy: notifier.describe(),
+        cartWrite: config.cartWrite,
         alerts: { total: store.alerts.length, armed: store.armed().length },
       };
     },
@@ -190,6 +192,10 @@ export function createApp({ config, staticFiles, sessions, limiter, store, bridg
       if (q.length < 2) throw new HttpError(400, "bad_request", "Recherche trop courte (2 caractères minimum).");
       return bridge.search(q);
     },
+
+    "GET /api/usual": async () => bridge.usual(),
+
+    "GET /api/lists": async () => bridge.lists(),
 
     "GET /api/alerts": async () => ({ alerts: store.alerts }),
 
@@ -234,6 +240,29 @@ export function createApp({ config, staticFiles, sessions, limiter, store, bridg
     return undefined;
   }
 
+  /** GET /api/lists/:id : produits d'une liste. */
+  async function handleList(req, url) {
+    const m = /^\/api\/lists\/([^/]+)$/.exec(url.pathname);
+    if (!m || req.method !== "GET") return undefined;
+    if (!isProductId(m[1])) throw new HttpError(400, "bad_request", "id de liste invalide.");
+    return bridge.list(m[1]);
+  }
+
+  /** PUT /api/cart/items/:id { quantity } : quantité cible, 0 retire la ligne. */
+  async function handleCartItem(req, url) {
+    const m = /^\/api\/cart\/items\/([^/]+)$/.exec(url.pathname);
+    if (!m || req.method !== "PUT") return undefined;
+    if (!config.cartWrite) {
+      throw new HttpError(403, "cart_write_disabled", "Modification du panier désactivée (CART_WRITE=false).");
+    }
+    const { quantity } = await readJson(req);
+    if (!isProductId(m[1])) throw new HttpError(400, "bad_request", "id invalide.");
+    if (!Number.isInteger(quantity) || quantity < 0 || quantity > MAX_QUANTITY) {
+      throw new HttpError(400, "bad_request", `quantity : entier de 0 à ${MAX_QUANTITY}.`);
+    }
+    return bridge.setQuantity(m[1], quantity);
+  }
+
   return async function handler(req, res) {
     const url = new URL(req.url ?? "/", "http://localhost");
     try {
@@ -254,7 +283,8 @@ export function createApp({ config, staticFiles, sessions, limiter, store, bridg
         if (!res.headersSent) send(res, 200, out);
         return;
       }
-      const out = await handleAlertItem(req, url);
+      const out =
+        (await handleCartItem(req, url)) ?? (await handleList(req, url)) ?? (await handleAlertItem(req, url));
       if (out === undefined) throw new HttpError(404, "not_found", "Route inconnue.");
       send(res, 200, out);
     } catch (err) {

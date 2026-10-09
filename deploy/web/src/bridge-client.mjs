@@ -49,6 +49,23 @@ export class BridgeClient {
     });
   }
 
+  usual() {
+    return this.request("GET", "/usual");
+  }
+
+  lists() {
+    return this.request("GET", "/lists");
+  }
+
+  list(id) {
+    return this.request("GET", `/lists/${encodeURIComponent(id)}`);
+  }
+
+  /** Quantité cible absolue ; 0 retire la ligne. Le bridge renvoie le panier relu. */
+  setQuantity(id, quantity) {
+    return this.request("PUT", `/cart/items/${encodeURIComponent(id)}`, { body: { quantity } });
+  }
+
   store() {
     return this.request("GET", "/store");
   }

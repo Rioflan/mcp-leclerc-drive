@@ -184,6 +184,10 @@ input {
 
 .search { display: flex; gap: .5rem; margin-bottom: .75rem; }
 
+.chips { display: flex; flex-wrap: wrap; gap: .4rem; margin: .75rem 0; }
+.chips button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+#fav-filter { margin-bottom: .25rem; }
+
 .products, .alerts {
   list-style: none;
   margin: .75rem 0 0;
@@ -215,7 +219,30 @@ input {
 .label { overflow-wrap: anywhere; }
 .meta { font-size: .85rem; }
 .status { grid-area: status; justify-self: start; }
-.product > button, .alert .buttons { grid-area: btn; }
+.product-actions, .alert .buttons { grid-area: btn; }
+.product-actions { display: flex; gap: .4rem; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.cart-ctl:empty { display: none; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--border); border-radius: 8px; }
+.stepper button { border: 0; background: transparent; padding: .35rem .7rem; }
+.stepper .qty { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; }
+.stepper.is-pending .qty { color: var(--muted); }
+
+.status { display: flex; gap: .35rem; align-items: center; }
+.nutri {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: .05rem .35rem;
+  border-radius: 6px;
+  font-size: .8rem;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+}
+.nutri-a { background: #038141; }
+.nutri-b { background: #85bb2f; }
+.nutri-c { background: #fecb02; color: #1b1f24; }
+.nutri-d { background: #ee8100; }
+.nutri-e { background: #e63e11; }
 .alert { grid-template-columns: 1fr auto; grid-template-areas: "info btn" "status btn"; }
 .alert .buttons { display: flex; gap: .4rem; flex-wrap: wrap; justify-content: flex-end; }
 
@@ -242,7 +269,7 @@ input {
 @media (max-width: 520px) {
   .product { grid-template-columns: 40px 1fr; grid-template-areas: "thumb info" "thumb status" "btn btn"; }
   .thumb { width: 40px; height: 40px; }
-  .product > button { justify-self: stretch; }
+  .product-actions { justify-content: flex-start; }
   .settings { grid-template-columns: 1fr; }
   .settings dd { margin-bottom: .5rem; }
 }
